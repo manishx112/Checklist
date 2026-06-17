@@ -166,6 +166,11 @@ export default function ChecklistDashboard() {
       }
       setEmployee(emp)
 
+      // Managers/admins have no personal tasks — land them on the Company Report
+      if (emp.role === 'admin' || emp.role === 'viewer') {
+        setAdminView(true)
+      }
+
       // Fetch total active tasks for the employee
       const { count, error: countErr } = await supabase
         .from('tasks')
@@ -337,7 +342,9 @@ export default function ChecklistDashboard() {
     if (!adminEmployees.length) return []
     const todayStr = new Date().toISOString().split('T')[0]
     
-    return adminEmployees.map(emp => {
+    return adminEmployees
+      .filter(emp => emp.role === 'doer') // exclude owner/admins — they don't have tasks
+      .map(emp => {
       const empInsts = adminInstances.filter(i => i.assigned_to === emp.emp_id)
       
       const dueInsts = empInsts.filter(i => {
@@ -504,34 +511,9 @@ export default function ChecklistDashboard() {
         </div>
       </header>
 
-      {/* Tab Switcher for Admin/Viewer */}
-      {(employee?.role === 'admin' || employee?.role === 'viewer') && (
-        <div className="flex bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-200 shadow-2xs mb-6 max-w-xs sm:max-w-sm">
-          <button
-            onClick={() => {
-              setAdminView(false)
-              setSelectedWeekOffset(0) // Reset to current week when viewing personal checklist
-            }}
-            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
-              !adminView
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
-            }`}
-          >
-            My Checklist
-          </button>
-          <button
-            onClick={() => setAdminView(true)}
-            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
-              adminView
-                ? 'bg-slate-900 text-white shadow-sm'
-                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
-            }`}
-          >
-            Company Report
-          </button>
-        </div>
-      )}
+      {/* Managers (viewer) and admins/owners have no personal tasks, so they are
+          locked to the Company Report — no "My Checklist" tab is shown for them.
+          Doers only ever see their own checklist, so no switcher is needed at all. */}
 
       {adminView ? (
         <div className="flex flex-col gap-6">
