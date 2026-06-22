@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import TaskManager from './TaskManager'
 import './ChecklistDashboard.css'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -127,7 +128,8 @@ export default function ChecklistDashboard() {
   const [successMsg, setSuccessMsg] = useState('')
 
   // Admin states
-  const [adminView, setAdminView] = useState(false)
+  // view: 'checklist' (doers) | 'report' (admin/viewer default) | 'tasks' (admin only)
+  const [view, setView] = useState('checklist')
   const [selectedWeekOffset, setSelectedWeekOffset] = useState(0) // 0 = Current, 1 = Last
   const [adminEmployees, setAdminEmployees] = useState([])
   const [adminInstances, setAdminInstances] = useState([])
@@ -168,7 +170,7 @@ export default function ChecklistDashboard() {
 
       // Managers/admins have no personal tasks — land them on the Company Report
       if (emp.role === 'admin' || emp.role === 'viewer') {
-        setAdminView(true)
+        setView('report')
       }
 
       // Fetch total active tasks for the employee
@@ -237,10 +239,10 @@ export default function ChecklistDashboard() {
   }, [employee, weekStart, weekEnd])
 
   useEffect(() => {
-    if (adminView) {
+    if (view === 'report') {
       fetchAdminData()
     }
-  }, [adminView, fetchAdminData])
+  }, [view, fetchAdminData])
 
   // Map instances to include calculated fields in JS
   const processedInstances = useMemo(() => {
@@ -511,11 +513,36 @@ export default function ChecklistDashboard() {
         </div>
       </header>
 
-      {/* Managers (viewer) and admins/owners have no personal tasks, so they are
-          locked to the Company Report — no "My Checklist" tab is shown for them.
-          Doers only ever see their own checklist, so no switcher is needed at all. */}
+      {/* Admins manage tasks and view the company report — but have no personal checklist.
+          Viewers (managers) only see the report. Doers only see their own checklist. */}
+      {employee?.role === 'admin' && (
+        <div className="flex bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-200 shadow-2xs mb-6 max-w-xs sm:max-w-md">
+          <button
+            onClick={() => setView('report')}
+            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
+              view === 'report'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
+            }`}
+          >
+            Company Report
+          </button>
+          <button
+            onClick={() => setView('tasks')}
+            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
+              view === 'tasks'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
+            }`}
+          >
+            Manage Tasks
+          </button>
+        </div>
+      )}
 
-      {adminView ? (
+      {view === 'tasks' ? (
+        <TaskManager />
+      ) : view === 'report' ? (
         <div className="flex flex-col gap-6">
           {/* Report Week Header */}
           <div className="flex flex-col sm:flex-row justify-between items-center gap-4 p-4 sm:p-5 bg-white/80 backdrop-blur-md rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden">
