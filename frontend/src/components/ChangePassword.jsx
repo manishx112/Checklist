@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { supabase } from '../lib/supabase'
 
 const MIN_LENGTH = 8
@@ -104,7 +105,10 @@ export default function ChangePassword() {
         </span>
       </button>
 
-      {open && (
+      {/* Rendered into document.body via a portal: the parent <header> has
+          backdrop-blur, which makes it the containing block for position:fixed
+          children — the overlay would otherwise be clipped to the header. */}
+      {open && createPortal(
         <div
           className="fixed inset-0 bg-slate-900/50 backdrop-blur-md flex items-end sm:items-center justify-center z-50 animate-fade-in"
           onClick={close}
@@ -259,7 +263,8 @@ export default function ChangePassword() {
               )}
             </div>
           </form>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   )
