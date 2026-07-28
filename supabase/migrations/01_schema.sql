@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS public.task_instances (
   -- Prevents duplicate instances for same task/employee/day
   CONSTRAINT uq_task_emp_date UNIQUE (task_id, assigned_to, planned_date),
 
-  -- Submission integrity
+  -- Submission integrity 
   CONSTRAINT chk_done_has_submission
     CHECK (status != 'done' OR (submitted_at IS NOT NULL AND submitted_by IS NOT NULL))
 );

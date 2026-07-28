@@ -1,52 +1,62 @@
 -- =====================================================================
--- 04_seed.sql
--- Real ExactChoice staff + current task list
--- Run AFTER 03_functions.sql
+-- 05_reset_tasks.sql
+-- PURPOSE: Wipe ALL existing tasks + instances and load the new task list.
+-- Run this ONCE in Supabase SQL Editor. Safe to re-run (it starts by clearing).
 --
--- NOTE: If your database already has the OLD task list, do NOT re-run this.
---       Run 05_reset_tasks.sql instead — it clears the old tasks first.
+-- WARNING: This deletes every task_instance and its audit history.
+--          All previously submitted / done marks are erased.
+--
+-- Day/date mapping used:
+--   Weekly  (W) -> weekday taken from the date you supplied
+--   Monthly (M) -> day-of-month taken from the date you supplied
+--   Daily   (D) -> date not used
+--   effective_from -> CURRENT_DATE (today) for every task, so no
+--                     back-dated "missed" history is created.
 -- =====================================================================
 
+BEGIN;
+
 -- ---------------------------------------------------------------------
--- 1. EMPLOYEES (real ExactChoice staff)
+-- 1. CLEAR OLD DATA
+--    Order matters: audit -> instances -> tasks (FKs are RESTRICT)
 -- ---------------------------------------------------------------------
-INSERT INTO public.employees (emp_code, full_name, department, email, role) VALUES
-  ('EMP001', 'Manish (Admin)',     'Management',             'exactchoicemis@gmail.com',          'admin'),
-  ('EMP002', 'Deepak',             'Supervisor',             'exactchoicecrm@gmail.com',          'doer'),
-  ('EMP003', 'Gopal',              'Accounts',               'exactchoiceac093@gmail.com',        'doer'),
-  ('EMP004', 'Dinkar Tyagi',       'Accounts',               'info.exactchoice@gmail.com',        'doer'),
-  ('EMP005', 'Himanshu',           'Operations Supervisor',  'exactchoicecrm+himanshu@gmail.com', 'doer'),
-  ('EMP006', 'Shiv kumar Uncle',   'Supervisor',             'exactchoicecrm+shiv@gmail.com',     'doer'),
-  ('EMP007', 'Aman',               'Assistant',              'exactchoicecrm+aman@gmail.com',     'doer')
-ON CONFLICT (emp_code) DO NOTHING;
+DELETE FROM public.submission_audit;
+DELETE FROM public.task_instances;
+DELETE FROM public.tasks;
+
+-- Restart task_id numbering from 1
+ALTER SEQUENCE public.tasks_task_id_seq RESTART WITH 1;
+ALTER SEQUENCE public.task_instances_instance_id_seq RESTART WITH 1;
+ALTER SEQUENCE public.submission_audit_audit_id_seq RESTART WITH 1;
 
 -- ---------------------------------------------------------------------
 -- 2. TASKS — Deepak (EMP002, Supervisor) — 10 tasks
---    Weekly days derived from supplied dates:
---    01/05/2026 = Fri, 26/05/2026 = Tue, 17/05/2026 = Sun, 24/05/2026 = Sun
 -- ---------------------------------------------------------------------
 INSERT INTO public.tasks
   (task_code, task_name, department, assigned_to, frequency, scheduled_day, scheduled_day_of_month, effective_from)
 VALUES
+  -- Daily
   ('T001', 'Ledger Debtor / Creditor',    'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T002', 'IMS Management',              'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T003', 'PP and Tag Stock Management', 'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T004', 'Sample Photo',                'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T005', 'Sales Calls',                 'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T006', 'Sample Update on Customer',   'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'D', NULL,  NULL, CURRENT_DATE),
+  -- Weekly  (01/05/2026 = Friday, 26/05/2026 = Tuesday, 17/05/2026 = Sunday, 24/05/2026 = Sunday)
   ('T007', 'Overdue Calls (Fri)',         'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'W', 'Fri', NULL, CURRENT_DATE),
   ('T008', 'Overdue Calls (Tue)',         'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'W', 'Tue', NULL, CURRENT_DATE),
   ('T009', 'Sample update on Shop',       'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'W', 'Sun', NULL, CURRENT_DATE),
-  ('T010', 'Ledger Match With Tally',     'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'W', 'Sun', NULL, CURRENT_DATE)
-ON CONFLICT (task_code) DO NOTHING;
+  ('T010', 'Ledger Match With Tally',     'Supervisor', (SELECT emp_id FROM public.employees WHERE emp_code='EMP002'), 'W', 'Sun', NULL, CURRENT_DATE);
 
 -- ---------------------------------------------------------------------
 -- 3. TASKS — Gopal (EMP003, Accounts) — 10 tasks
---    26/07/2026 = Sun (weekly), 30/07/2026 = day 30 (monthly)
+--    All dailies dated 23/07/2026 (Thu); weekly 26/07/2026 = Sunday;
+--    monthly 30/07/2026 = day 30
 -- ---------------------------------------------------------------------
 INSERT INTO public.tasks
   (task_code, task_name, department, assigned_to, frequency, scheduled_day, scheduled_day_of_month, effective_from)
 VALUES
+  -- Daily
   ('T101', 'create purchase bill',              'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T102', 'create sale bills invoices',        'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T103', 'share bill & sale whatsapp group',  'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'D', NULL,  NULL, CURRENT_DATE),
@@ -55,31 +65,35 @@ VALUES
   ('T106', 'filling update',                    'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T107', 'bank detail update',                'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T108', 'payment update cash book',          'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'D', NULL,  NULL, CURRENT_DATE),
+  -- Weekly
   ('T109', 'ledger debters check',              'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'W', 'Sun', NULL, CURRENT_DATE),
-  ('T110', 'monthly filling bank statment',     'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'M', NULL,  30,   CURRENT_DATE)
-ON CONFLICT (task_code) DO NOTHING;
+  -- Monthly
+  ('T110', 'monthly filling bank statment',     'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP003'), 'M', NULL,  30,   CURRENT_DATE);
 
 -- ---------------------------------------------------------------------
 -- 4. TASKS — Dinkar Tyagi (EMP004, Accounts) — 10 tasks
---    All dated 12/05/2026 = Tue -> weekly on Tue, monthly on day 12
+--    All dated 12/05/2026 = Tuesday -> weekly on Tue, monthly on day 12
 -- ---------------------------------------------------------------------
 INSERT INTO public.tasks
   (task_code, task_name, department, assigned_to, frequency, scheduled_day, scheduled_day_of_month, effective_from)
 VALUES
+  -- Daily
   ('T201', 'Day Book Update',                           'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'D', NULL,  NULL, CURRENT_DATE),
   ('T202', 'Attendance Sheet Update',                   'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'D', NULL,  NULL, CURRENT_DATE),
+  -- Weekly
   ('T203', 'Billing',                                   'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'W', 'Tue', NULL, CURRENT_DATE),
   ('T204', 'Sales / Purchase List',                     'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'W', 'Tue', NULL, CURRENT_DATE),
   ('T205', 'Ledger Debtor / Creditor Preparation',      'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'W', 'Tue', NULL, CURRENT_DATE),
   ('T206', 'Overdue Update to Sir',                     'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'W', 'Tue', NULL, CURRENT_DATE),
   ('T207', 'Preparing Account Statements with Parties', 'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'W', 'Tue', NULL, CURRENT_DATE),
+  -- Monthly
   ('T208', 'Salary Sheet',                              'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'M', NULL,  12,   CURRENT_DATE),
   ('T209', 'Chemical Consumption List',                 'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'M', NULL,  12,   CURRENT_DATE),
-  ('T210', 'Dry Process Bill',                          'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'M', NULL,  12,   CURRENT_DATE)
-ON CONFLICT (task_code) DO NOTHING;
+  ('T210', 'Dry Process Bill',                          'Accounts', (SELECT emp_id FROM public.employees WHERE emp_code='EMP004'), 'M', NULL,  12,   CURRENT_DATE);
 
 -- ---------------------------------------------------------------------
--- 5. WORKING DAYS CALENDAR (next 365 days, Monday off)
+-- 5. TOP UP THE WORKING-DAY CALENDAR (next 365 days from today)
+--    Needed because task_instances.planned_date has an FK to working_days.
 -- ---------------------------------------------------------------------
 INSERT INTO public.working_days (work_date, day_name, week_number, month_num, year_num, is_working)
 SELECT
@@ -91,7 +105,7 @@ SELECT
   EXTRACT(WEEK FROM d)::INT,
   EXTRACT(MONTH FROM d)::INT,
   EXTRACT(YEAR FROM d)::INT,
-  (EXTRACT(DOW FROM d)::INT != 1)  -- Monday (DOW=1) is non-working
+  (EXTRACT(DOW FROM d)::INT != 1)     -- Monday off
 FROM generate_series(
   CURRENT_DATE::timestamp,
   (CURRENT_DATE + 365)::timestamp,
@@ -106,3 +120,27 @@ SELECT * FROM public.generate_instances_range(
   CURRENT_DATE,
   (CURRENT_DATE + 45)::date
 );
+
+COMMIT;
+
+-- ---------------------------------------------------------------------
+-- 7. VERIFY (run these after the script — should show 30 tasks: 10 each)
+-- ---------------------------------------------------------------------
+-- Task count per employee
+SELECT e.full_name,
+       COUNT(*)                                        AS total_tasks,
+       COUNT(*) FILTER (WHERE t.frequency = 'D')       AS daily,
+       COUNT(*) FILTER (WHERE t.frequency = 'W')       AS weekly,
+       COUNT(*) FILTER (WHERE t.frequency = 'M')       AS monthly
+FROM public.tasks t
+JOIN public.employees e ON e.emp_id = t.assigned_to
+GROUP BY e.full_name
+ORDER BY e.full_name;
+
+-- Instances created for today
+SELECT e.full_name, COUNT(*) AS todays_tasks
+FROM public.task_instances ti
+JOIN public.employees e ON e.emp_id = ti.assigned_to
+WHERE ti.planned_date = CURRENT_DATE
+GROUP BY e.full_name
+ORDER BY e.full_name;

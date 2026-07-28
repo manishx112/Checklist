@@ -62,7 +62,10 @@ In Supabase Dashboard → **SQL Editor** → New query, paste and run each file 
 1. `01_schema.sql` → creates all tables
 2. `02_rls_policies.sql` → enables RLS
 3. `03_functions.sql` → creates `submit_tasks_bulk` and helpers
-4. `04_seed.sql` → seeds 7 employees, 35 tasks, 365 days calendar, 7 days of instances
+4. `04_seed.sql` → seeds 7 employees, 30 tasks, 365 days calendar, 45 days of instances
+
+**Already have the old task list loaded?** Run `05_reset_tasks.sql` instead — it wipes all
+existing tasks/instances/audit history and loads the current 30-task list.
 
 **Note:** Before running `04_seed.sql`, edit the email addresses to your real ones.
 
