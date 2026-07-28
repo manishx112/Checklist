@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import TaskManager from './TaskManager'
+import ChangePassword from './ChangePassword'
+import AdminPasswords from './AdminPasswords'
 import './ChecklistDashboard.css'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -498,6 +500,8 @@ export default function ChecklistDashboard() {
             </div>
           </div>
           
+          <ChangePassword />
+
           <button
             onClick={() => supabase.auth.signOut()}
             className="relative group overflow-hidden w-full sm:w-auto py-2.5 px-4 rounded-2xl border border-slate-200 bg-white text-slate-605 hover:text-white text-xs sm:text-sm font-bold transition-all duration-300 active:scale-98 cursor-pointer shadow-2xs hover:shadow-xs"
@@ -537,10 +541,22 @@ export default function ChecklistDashboard() {
           >
             Manage Tasks
           </button>
+          <button
+            onClick={() => setView('logins')}
+            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
+              view === 'logins'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
+            }`}
+          >
+            Logins
+          </button>
         </div>
       )}
 
-      {view === 'tasks' ? (
+      {view === 'logins' ? (
+        <AdminPasswords />
+      ) : view === 'tasks' ? (
         <TaskManager />
       ) : view === 'report' ? (
         <div className="flex flex-col gap-6">
