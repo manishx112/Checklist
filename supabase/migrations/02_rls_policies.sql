@@ -42,6 +42,7 @@ $$;
 -- EMPLOYEES policies
 -- ---------------------------------------------------------------------
 -- Everyone can see own record + admins see all
+DROP POLICY IF EXISTS employees_select ON public.employees;
 CREATE POLICY employees_select ON public.employees
   FOR SELECT TO authenticated
   USING (
@@ -50,6 +51,7 @@ CREATE POLICY employees_select ON public.employees
   );
 
 -- Only admins can insert/update/delete employees
+DROP POLICY IF EXISTS employees_admin_write ON public.employees;
 CREATE POLICY employees_admin_write ON public.employees
   FOR ALL TO authenticated
   USING (public.current_emp_role() = 'admin')
@@ -58,10 +60,12 @@ CREATE POLICY employees_admin_write ON public.employees
 -- ---------------------------------------------------------------------
 -- WORKING_DAYS policies (read-only for all authenticated)
 -- ---------------------------------------------------------------------
+DROP POLICY IF EXISTS working_days_read ON public.working_days;
 CREATE POLICY working_days_read ON public.working_days
   FOR SELECT TO authenticated
   USING (TRUE);
 
+DROP POLICY IF EXISTS working_days_admin_write ON public.working_days;
 CREATE POLICY working_days_admin_write ON public.working_days
   FOR ALL TO authenticated
   USING (public.current_emp_role() = 'admin')
@@ -71,6 +75,7 @@ CREATE POLICY working_days_admin_write ON public.working_days
 -- TASKS policies
 -- ---------------------------------------------------------------------
 -- Doers see only tasks assigned to them; admins/viewers see all
+DROP POLICY IF EXISTS tasks_select ON public.tasks;
 CREATE POLICY tasks_select ON public.tasks
   FOR SELECT TO authenticated
   USING (
@@ -79,6 +84,7 @@ CREATE POLICY tasks_select ON public.tasks
   );
 
 -- Only admins manage tasks
+DROP POLICY IF EXISTS tasks_admin_write ON public.tasks;
 CREATE POLICY tasks_admin_write ON public.tasks
   FOR ALL TO authenticated
   USING (public.current_emp_role() = 'admin')
@@ -88,6 +94,7 @@ CREATE POLICY tasks_admin_write ON public.tasks
 -- TASK_INSTANCES policies (CRITICAL — solves Vulnerability #4)
 -- ---------------------------------------------------------------------
 -- Doers see ONLY their own instances
+DROP POLICY IF EXISTS instances_select_own ON public.task_instances;
 CREATE POLICY instances_select_own ON public.task_instances
   FOR SELECT TO authenticated
   USING (
@@ -97,6 +104,7 @@ CREATE POLICY instances_select_own ON public.task_instances
 
 -- Doers can ONLY update their own pending instances
 -- (cannot mark someone else's task done, cannot un-do a done task)
+DROP POLICY IF EXISTS instances_update_own ON public.task_instances;
 CREATE POLICY instances_update_own ON public.task_instances
   FOR UPDATE TO authenticated
   USING (
@@ -110,11 +118,13 @@ CREATE POLICY instances_update_own ON public.task_instances
   );
 
 -- Only admins can insert instances directly (normally done by generate function)
+DROP POLICY IF EXISTS instances_admin_insert ON public.task_instances;
 CREATE POLICY instances_admin_insert ON public.task_instances
   FOR INSERT TO authenticated
   WITH CHECK (public.current_emp_role() = 'admin');
 
 -- Only admins can delete
+DROP POLICY IF EXISTS instances_admin_delete ON public.task_instances;
 CREATE POLICY instances_admin_delete ON public.task_instances
   FOR DELETE TO authenticated
   USING (public.current_emp_role() = 'admin');
@@ -123,6 +133,7 @@ CREATE POLICY instances_admin_delete ON public.task_instances
 -- SUBMISSION_AUDIT policies
 -- ---------------------------------------------------------------------
 -- Read: own audit entries + admins/viewers see all
+DROP POLICY IF EXISTS audit_select ON public.submission_audit;
 CREATE POLICY audit_select ON public.submission_audit
   FOR SELECT TO authenticated
   USING (
@@ -131,6 +142,7 @@ CREATE POLICY audit_select ON public.submission_audit
   );
 
 -- Insert: any authenticated user (typically called by SECURITY DEFINER functions)
+DROP POLICY IF EXISTS audit_insert ON public.submission_audit;
 CREATE POLICY audit_insert ON public.submission_audit
   FOR INSERT TO authenticated
   WITH CHECK (TRUE);

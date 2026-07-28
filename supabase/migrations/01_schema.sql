@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS public.employees (
   updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_employees_auth_user ON public.employees(auth_user_id) WHERE is_active = TRUE;
-CREATE INDEX idx_employees_active ON public.employees(is_active);
+CREATE INDEX IF NOT EXISTS idx_employees_auth_user ON public.employees(auth_user_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_employees_active ON public.employees(is_active);
 
 -- ---------------------------------------------------------------------
 -- 2. WORKING DAYS CALENDAR (Tue-Sun working, Mon off)
@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS public.working_days (
   holiday_reason   VARCHAR(100)
 );
 
-CREATE INDEX idx_working_days_working ON public.working_days(work_date) WHERE is_working = TRUE;
+CREATE INDEX IF NOT EXISTS idx_working_days_working ON public.working_days(work_date) WHERE is_working = TRUE;
 
 -- ---------------------------------------------------------------------
 -- 3. TASKS (master definitions)
@@ -69,8 +69,8 @@ CREATE TABLE IF NOT EXISTS public.tasks (
     CHECK (effective_to IS NULL OR effective_to >= effective_from)
 );
 
-CREATE INDEX idx_tasks_assigned_active ON public.tasks(assigned_to, is_active);
-CREATE INDEX idx_tasks_freq ON public.tasks(frequency) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tasks_assigned_active ON public.tasks(assigned_to, is_active);
+CREATE INDEX IF NOT EXISTS idx_tasks_freq ON public.tasks(frequency) WHERE is_active = TRUE;
 
 -- ---------------------------------------------------------------------
 -- 4. TASK INSTANCES (one row per scheduled occurrence)
@@ -97,9 +97,9 @@ CREATE TABLE IF NOT EXISTS public.task_instances (
     CHECK (status != 'done' OR (submitted_at IS NOT NULL AND submitted_by IS NOT NULL))
 );
 
-CREATE INDEX idx_instances_emp_date      ON public.task_instances(assigned_to, planned_date);
-CREATE INDEX idx_instances_date_status   ON public.task_instances(planned_date, status);
-CREATE INDEX idx_instances_pending_only  ON public.task_instances(assigned_to, planned_date) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_instances_emp_date      ON public.task_instances(assigned_to, planned_date);
+CREATE INDEX IF NOT EXISTS idx_instances_date_status   ON public.task_instances(planned_date, status);
+CREATE INDEX IF NOT EXISTS idx_instances_pending_only  ON public.task_instances(assigned_to, planned_date) WHERE status = 'pending';
 
 -- ---------------------------------------------------------------------
 -- 5. SUBMISSION AUDIT LOG (every change tracked)
@@ -118,8 +118,8 @@ CREATE TABLE IF NOT EXISTS public.submission_audit (
   notes            TEXT
 );
 
-CREATE INDEX idx_audit_instance ON public.submission_audit(instance_id);
-CREATE INDEX idx_audit_changed_by ON public.submission_audit(changed_by, changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_instance ON public.submission_audit(instance_id);
+CREATE INDEX IF NOT EXISTS idx_audit_changed_by ON public.submission_audit(changed_by, changed_at DESC);
 
 -- ---------------------------------------------------------------------
 -- 6. UPDATE TRIGGERS (auto-maintain updated_at)
@@ -132,14 +132,17 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS trg_employees_updated_at ON public.employees;
 CREATE TRIGGER trg_employees_updated_at
   BEFORE UPDATE ON public.employees
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_tasks_updated_at ON public.tasks;
 CREATE TRIGGER trg_tasks_updated_at
   BEFORE UPDATE ON public.tasks
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_instances_updated_at ON public.task_instances;
 CREATE TRIGGER trg_instances_updated_at
   BEFORE UPDATE ON public.task_instances
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();

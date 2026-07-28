@@ -8,6 +8,8 @@
 -- Creates task instances for a specific working day
 -- Handles D / W / M frequencies + holiday shift logic
 -- ---------------------------------------------------------------------
+-- Dropped first: CREATE OR REPLACE cannot change a function's return type
+DROP FUNCTION IF EXISTS public.generate_instances_for_date(DATE);
 CREATE OR REPLACE FUNCTION public.generate_instances_for_date(p_target_date DATE)
 RETURNS TABLE(generated_count INT, target_date DATE, day_name VARCHAR)
 LANGUAGE plpgsql
@@ -62,6 +64,7 @@ $$;
 -- FUNCTION: generate_instances_range(start_date, end_date)
 -- Bulk-generate for a date range (use during initial setup)
 -- ---------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.generate_instances_range(DATE, DATE);
 CREATE OR REPLACE FUNCTION public.generate_instances_range(
   p_start_date DATE,
   p_end_date DATE
@@ -94,6 +97,7 @@ $$;
 -- Auto-marks pending instances as missed based on frequency grace period
 -- D = next day, W = 6 days grace, M = month-end
 -- ---------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.mark_missed_instances();
 CREATE OR REPLACE FUNCTION public.mark_missed_instances()
 RETURNS TABLE(missed_count INT)
 LANGUAGE plpgsql
@@ -137,6 +141,7 @@ $$;
 -- ATOMIC bulk submission with ownership validation + audit log
 -- This is the function the frontend calls
 -- ---------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.submit_tasks_bulk(BIGINT[], TEXT);
 CREATE OR REPLACE FUNCTION public.submit_tasks_bulk(
   p_instance_ids BIGINT[],
   p_remarks TEXT DEFAULT NULL
@@ -200,8 +205,13 @@ GRANT EXECUTE ON FUNCTION public.current_emp_role() TO authenticated;
 -- ---------------------------------------------------------------------
 -- VIEW: weekly_dashboard
 -- Optimized view for the frontend dashboard
+--
+-- Dropped first because CREATE OR REPLACE VIEW cannot remove or reorder
+-- columns — it only allows appending new ones at the end.
 -- ---------------------------------------------------------------------
-CREATE OR REPLACE VIEW public.weekly_dashboard AS
+DROP VIEW IF EXISTS public.weekly_dashboard;
+
+CREATE VIEW public.weekly_dashboard AS
 SELECT
   ti.instance_id,
   ti.task_id,
