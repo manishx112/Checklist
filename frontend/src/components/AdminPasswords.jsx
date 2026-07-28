@@ -193,14 +193,15 @@ export default function AdminPasswords() {
       {/* Reset modal */}
       {target && (
         <div
-          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-5 z-50 animate-fade-in"
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-md flex items-end sm:items-center justify-center z-50 animate-fade-in"
           onClick={close}
         >
           <form
             onSubmit={handleReset}
             onClick={e => e.stopPropagation()}
-            className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-100"
+            className="relative bg-white w-full sm:max-w-[400px] rounded-t-[28px] sm:rounded-[28px] p-6 pb-8 sm:pb-6 shadow-2xl shadow-slate-900/20 max-h-[92vh] overflow-y-auto no-scrollbar animate-slide-up"
           >
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 via-indigo-500 to-violet-500 rounded-t-[28px]" />
             <h3 className="text-lg font-extrabold text-slate-900 mb-1">Set New Password</h3>
             <p className="text-xs text-slate-400 font-medium mb-5">
               For <strong className="text-slate-700 font-bold">{target.full_name}</strong> ({target.emp_code})
