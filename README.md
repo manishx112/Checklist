@@ -1,4 +1,4 @@
-# Washing Plant Checklist System
+# ExactChoice Checklist System
 
 Production-ready daily checklist for multi-employee task tracking. Built on **Supabase (PostgreSQL + Auth + RLS) + React (Vite)**.
 
