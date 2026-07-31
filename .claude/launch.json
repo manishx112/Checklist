@@ -1,0 +1,47 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "checklist",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "item-image-lookup",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/2f0acdb4-8333-4ea0-9c15-4969c351606d/scratchpad/serve.js"],
+      "port": 4599
+    },
+    {
+      "name": "ims-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/86d2d585-932e-448d-a4ef-d01ec7b0d945/scratchpad/ims-server.js"],
+      "port": 8231
+    },
+    {
+      "name": "command-center",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["E:/IN Out Dash/preview-server.js"],
+      "port": 8010
+    },
+    {
+      "name": "in-out-dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/17c04343-2e4e-4a22-91b7-9cea46aca691/scratchpad/serve-inout.js"],
+      "port": 8321
+    },
+    {
+      "name": "ladies-lot-dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/6bceccf7-4e52-4b2d-ad73-af0086fe9996/scratchpad/static-server.js"],
+      "port": 4321
+    },
+    {
+      "name": "man-lot-dash",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/171fc58c-996c-4b59-b548-e8f1f80a3589/scratchpad/man-dash-server.js"],
+      "port": 8138
+    }
+  ]
+}
