@@ -8,10 +8,24 @@ import './ChecklistDashboard.css'
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const WORKING_DAYS = ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// Local-date formatter. NEVER use toISOString() here — it converts to UTC,
+// so any time before 05:30 IST resolves to the previous day and the whole
+// dashboard shows yesterday.
+function toDateStr(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function today() {
+  return toDateStr(new Date())
+}
+
 function getWeekForOffset(offsetWeeks = 0) {
-  const today = new Date()
-  const targetDate = new Date(today)
-  targetDate.setDate(today.getDate() - (offsetWeeks * 7))
+  const now = new Date()
+  const targetDate = new Date(now)
+  targetDate.setDate(now.getDate() - (offsetWeeks * 7))
 
   const dow = targetDate.getDay()
   const daysFromMonday = dow === 0 ? 6 : dow - 1
@@ -23,12 +37,24 @@ function getWeekForOffset(offsetWeeks = 0) {
     d.setDate(monday.getDate() + i)
     return {
       day: DAY_NAMES[i],
-      date: d.toISOString().split('T')[0],
+      date: toDateStr(d),
       label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       isOff: i === 0,
-      isToday: d.toDateString() === today.toDateString(),
+      isToday: d.toDateString() === now.toDateString(),
     }
   })
+}
+
+// offsetMonths: 0 = this month, 1 = last month, ...
+function getMonthForOffset(offsetMonths = 0) {
+  const now = new Date()
+  const first = new Date(now.getFullYear(), now.getMonth() - offsetMonths, 1)
+  const last = new Date(now.getFullYear(), now.getMonth() - offsetMonths + 1, 0)
+  return {
+    start: toDateStr(first),
+    end: toDateStr(last),
+    label: first.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' }),
+  }
 }
 
 function getEmployeeAvatarStyle(name) {
@@ -132,14 +158,33 @@ export default function ChecklistDashboard() {
   // Admin states
   // view: 'checklist' (doers) | 'report' (admin/viewer default) | 'tasks' (admin only)
   const [view, setView] = useState('checklist')
-  const [selectedWeekOffset, setSelectedWeekOffset] = useState(0) // 0 = Current, 1 = Last
   const [adminEmployees, setAdminEmployees] = useState([])
   const [adminInstances, setAdminInstances] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
 
-  const week = useMemo(() => getWeekForOffset(selectedWeekOffset), [selectedWeekOffset])
+  // Company Report period — independent of the doer checklist, which is
+  // always the current week.
+  const [reportMode, setReportMode] = useState('week')   // 'week' | 'month'
+  const [periodOffset, setPeriodOffset] = useState(0)    // 0 = current, 1 = previous
+
+  // The doer checklist always shows the current week
+  const week = useMemo(() => getWeekForOffset(0), [])
   const weekStart = week[0].date
   const weekEnd = week[6].date
+
+  const reportRange = useMemo(() => {
+    if (reportMode === 'month') return getMonthForOffset(periodOffset)
+    const w = getWeekForOffset(periodOffset)
+    return {
+      start: w[0].date,
+      end: w[6].date,
+      label: `${new Date(w[0].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })} – ${new Date(w[6].date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+    }
+  }, [reportMode, periodOffset])
+
+  // A finished period counts every instance as due; the current one only
+  // counts up to today, so nobody is penalised for work not yet reached.
+  const periodIsPast = periodOffset > 0
 
   useEffect(() => {
     const today = week.find(w => w.isToday && !w.isOff)
@@ -226,11 +271,11 @@ export default function ChecklistDashboard() {
       const { data: insts, error: instErr } = await supabase
         .from('weekly_dashboard')
         .select('*')
-        .gte('planned_date', weekStart)
-        .lte('planned_date', weekEnd)
-        
+        .gte('planned_date', reportRange.start)
+        .lte('planned_date', reportRange.end)
+
       if (instErr) throw instErr
-      
+
       setAdminEmployees(emps || [])
       setAdminInstances(insts || [])
     } catch (err) {
@@ -238,7 +283,7 @@ export default function ChecklistDashboard() {
     } finally {
       setAdminLoading(false)
     }
-  }, [employee, weekStart, weekEnd])
+  }, [employee, reportRange])
 
   useEffect(() => {
     if (view === 'report') {
@@ -248,7 +293,7 @@ export default function ChecklistDashboard() {
 
   // Map instances to include calculated fields in JS
   const processedInstances = useMemo(() => {
-    const todayStr = new Date().toISOString().split('T')[0]
+    const todayStr = today()
     return instances.map(row => {
       const is_due = row.planned_date <= todayStr;
       
@@ -344,15 +389,15 @@ export default function ChecklistDashboard() {
 
   const compiledReports = useMemo(() => {
     if (!adminEmployees.length) return []
-    const todayStr = new Date().toISOString().split('T')[0]
-    
+    const todayStr = today()
+
     return adminEmployees
       .filter(emp => emp.role === 'doer') // exclude owner/admins — they don't have tasks
       .map(emp => {
       const empInsts = adminInstances.filter(i => i.assigned_to === emp.emp_id)
-      
+
       const dueInsts = empInsts.filter(i => {
-        if (selectedWeekOffset > 0) return true
+        if (periodIsPast) return true
         return i.planned_date <= todayStr
       })
       
@@ -395,7 +440,7 @@ export default function ChecklistDashboard() {
         pctNotOnTime
       }
     })
-  }, [adminEmployees, adminInstances, selectedWeekOffset])
+  }, [adminEmployees, adminInstances, periodIsPast])
 
   const filterCounts = useMemo(() => ({
     pending: dayInstances.filter(i => i.status === 'pending').length,
@@ -456,7 +501,7 @@ export default function ChecklistDashboard() {
   if (error && !employee) return <div className="flex justify-center items-center py-20 text-rose-600 font-semibold font-sans">⚠️ {error}</div>
 
   const selectedInstances = visibleInstances.filter(i => selected.has(i.instance_id))
-  const todayStr = new Date().toISOString().split('T')[0]
+  const todayStr = today()
 
   return (
     <div className="min-h-screen bg-slate-100/55 antialiased font-sans text-slate-700 overflow-x-hidden">
@@ -565,31 +610,51 @@ export default function ChecklistDashboard() {
             <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-blue-500 via-indigo-500 to-purple-500" />
             <div className="text-left w-full sm:w-auto">
               <h2 className="text-lg font-black text-slate-900 leading-tight">Company Performance Report</h2>
-              <p className="text-[10px] text-slate-400 font-bold tracking-wider uppercase">Weekly Statistics</p>
+              <p className="text-[10px] text-slate-400 font-bold tracking-wider uppercase">
+                {reportMode === 'month' ? 'Monthly' : 'Weekly'} · {reportRange.label}
+              </p>
             </div>
-            
-            {/* Week Toggle */}
-            <div className="flex bg-slate-100/80 p-1 rounded-xl gap-1 border border-slate-200 w-full sm:w-auto justify-center">
-              <button
-                onClick={() => setSelectedWeekOffset(0)}
-                className={`flex-1 sm:flex-initial py-1.5 px-4 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  selectedWeekOffset === 0
-                    ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Current Week
-              </button>
-              <button
-                onClick={() => setSelectedWeekOffset(1)}
-                className={`flex-1 sm:flex-initial py-1.5 px-4 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  selectedWeekOffset === 1
-                    ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                Last Week
-              </button>
+
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+              {/* Weekly / Monthly */}
+              <div className="flex bg-slate-900 p-1 rounded-xl gap-1 justify-center">
+                {[
+                  { key: 'week',  label: 'Weekly'  },
+                  { key: 'month', label: 'Monthly' },
+                ].map(m => (
+                  <button
+                    key={m.key}
+                    onClick={() => { setReportMode(m.key); setPeriodOffset(0) }}
+                    className={`flex-1 sm:flex-initial py-1.5 px-4 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      reportMode === m.key
+                        ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                        : 'text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Current / Previous */}
+              <div className="flex bg-slate-100/80 p-1 rounded-xl gap-1 border border-slate-200 justify-center">
+                {[
+                  { key: 0, label: reportMode === 'month' ? 'This Month' : 'This Week' },
+                  { key: 1, label: reportMode === 'month' ? 'Last Month' : 'Last Week' },
+                ].map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => setPeriodOffset(p.key)}
+                    className={`flex-1 sm:flex-initial py-1.5 px-4 rounded-lg text-xs font-bold transition cursor-pointer whitespace-nowrap ${
+                      periodOffset === p.key
+                        ? 'bg-white text-slate-900 shadow-2xs font-extrabold'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -599,7 +664,7 @@ export default function ChecklistDashboard() {
             </div>
           ) : compiledReports.length === 0 ? (
             <div className="py-20 text-center text-slate-400 text-sm font-medium bg-white border border-slate-200 rounded-3xl shadow-2xs">
-              No active employees or tasks found for this week.
+              No active employees or tasks found for {reportRange.label}.
             </div>
           ) : (
             <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-2xs">

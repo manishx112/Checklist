@@ -9,7 +9,11 @@ const FREQ_BADGE = {
   M: 'bg-amber-50 text-amber-700 border border-amber-150',
 }
 
-const todayStr = () => new Date().toISOString().split('T')[0]
+// Local date, not UTC — toISOString() would roll back a day before 05:30 IST
+const todayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 const emptyForm = () => ({
   task_id: null,
@@ -28,6 +32,24 @@ const emptyForm = () => ({
 function initials(name) {
   const words = (name || '').trim().split(/\s+/)
   return (words.length > 1 ? words[0][0] + words[1][0] : (name || '?').slice(0, 2)).toUpperCase()
+}
+
+// One flat, ever-increasing series shared by every employee:
+// T1001 -> T1002 -> T1003 ... Always the highest existing number + 1.
+//
+// Deliberately NOT per-employee bands (T0xx Deepak, T1xx Gopal, ...): those
+// cap at 99 tasks per person and have to be re-planned when someone fills up.
+// A flat series never runs out and never needs a decision.
+//
+// Starts at T1001 so new codes always sort above the old T001–T608 range.
+function nextTaskCode(tasks) {
+  const numbers = tasks
+    .map(t => /^T?(\d+)$/.exec(t.task_code || ''))
+    .filter(Boolean)
+    .map(m => parseInt(m[1], 10))
+
+  const highest = numbers.length ? Math.max(...numbers) : 0
+  return 'T' + (Math.max(highest, 1000) + 1)
 }
 
 function scheduleText(t) {
@@ -107,7 +129,7 @@ export default function TaskManager() {
   }, [visibleTasks, empById])
 
   function openCreate() {
-    setForm(emptyForm())
+    setForm({ ...emptyForm(), task_code: nextTaskCode(tasks) })
     setFormError('')
     setShowForm(true)
   }
@@ -143,9 +165,9 @@ export default function TaskManager() {
   }
 
   function validate() {
-    if (!form.task_code.trim()) return 'Task code is required'
-    if (!form.task_name.trim()) return 'Task name is required'
     if (!form.assigned_to) return 'Please assign the task to an employee'
+    if (!form.task_code.trim()) return 'Task code could not be generated — close and reopen the form'
+    if (!form.task_name.trim()) return 'Task name is required'
     if (!form.department.trim()) return 'Department is required'
     if (form.frequency === 'W' && !form.scheduled_day) return 'Weekly tasks need a scheduled day'
     if (form.frequency === 'M') {
@@ -361,14 +383,25 @@ export default function TaskManager() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Task Code</label>
-                  <input
-                    type="text"
-                    value={form.task_code}
-                    onChange={e => updateField('task_code', e.target.value)}
-                    placeholder="e.g. T301"
-                    className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/15 focus:border-indigo-500 transition"
-                  />
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                    Task Code <span className="text-slate-300 normal-case font-semibold">(auto)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={form.task_code}
+                      readOnly
+                      tabIndex={-1}
+                      placeholder="auto"
+                      title="Generated automatically in increasing order so codes can never clash"
+                      className="w-full px-3 py-2 pr-9 bg-slate-100 border border-slate-200 rounded-xl text-slate-600 text-sm font-mono font-bold placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 cursor-not-allowed focus:outline-hidden"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 pointer-events-none">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.2">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                      </svg>
+                    </span>
+                  </div>
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Assign To</label>
