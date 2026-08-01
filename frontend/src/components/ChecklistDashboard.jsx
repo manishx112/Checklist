@@ -368,12 +368,13 @@ export default function ChecklistDashboard() {
     const pending = dueInstances.filter(i => i.status === 'pending').length
     const missed = dueInstances.filter(i => i.status === 'missed').length
     
-    // % Work Not Done: ((Actual - Plan) / Plan) * 100
-    const pctWorkNotDone = dueCount > 0 ? Math.round(((done - dueCount) / dueCount) * 100) : 0
-    
-    // % On Time: (On Time / Plan) * 100
-    const pctOnTime = dueCount > 0 ? Math.round((onTime / dueCount) * 100) : 0
-    
+    // Box 1 — how much of the planned work was NOT finished on time.
+    // Counts both work never done and work done late.
+    const pctNotOnTime = dueCount > 0 ? Math.round(((dueCount - onTime) / dueCount) * 100) : 0
+
+    // Box 2 — how much of the planned work is finished, on time or late.
+    const pctCompleted = dueCount > 0 ? Math.round((done / dueCount) * 100) : 0
+
     return {
       total,
       dueCount,
@@ -382,8 +383,8 @@ export default function ChecklistDashboard() {
       late,
       pending,
       missed,
-      pctWorkNotDone,
-      pctOnTime
+      pctNotOnTime,
+      pctCompleted
     }
   }, [processedInstances])
 
@@ -836,9 +837,9 @@ export default function ChecklistDashboard() {
             </svg>
           </div>
           <div className="text-left leading-tight flex flex-col">
-            <span className="text-[9px] font-bold text-slate-405 uppercase tracking-widest">Deviation</span>
-            <strong className="text-xl font-black text-rose-655 mt-0.5">{weekStats.pctWorkNotDone}%</strong>
-            <span className="text-[9px] text-slate-400 font-medium mt-0.5">not submitted on time</span>
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Not On Time</span>
+            <strong className="text-xl font-black text-rose-600 mt-0.5">{weekStats.pctNotOnTime}%</strong>
+            <span className="text-[9px] text-slate-400 font-medium mt-0.5">late or not done</span>
           </div>
         </div>
 
@@ -850,9 +851,9 @@ export default function ChecklistDashboard() {
             </svg>
           </div>
           <div className="text-left leading-tight flex flex-col">
-            <span className="text-[9px] font-bold text-slate-405 uppercase tracking-widest">Compliance</span>
-            <strong className="text-xl font-black text-blue-605 mt-0.5">{weekStats.pctOnTime}%</strong>
-            <span className="text-[9px] text-slate-400 font-medium mt-0.5">on-time rate</span>
+            <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Completion</span>
+            <strong className="text-xl font-black text-blue-600 mt-0.5">{weekStats.pctCompleted}%</strong>
+            <span className="text-[9px] text-slate-400 font-medium mt-0.5">tasks completed</span>
           </div>
         </div>
       </div>
