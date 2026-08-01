@@ -838,7 +838,7 @@ export default function ChecklistDashboard() {
           <div className="text-left leading-tight flex flex-col">
             <span className="text-[9px] font-bold text-slate-405 uppercase tracking-widest">Deviation</span>
             <strong className="text-xl font-black text-rose-655 mt-0.5">{weekStats.pctWorkNotDone}%</strong>
-            <span className="text-[9px] text-slate-400 font-medium mt-0.5">missed from plan</span>
+            <span className="text-[9px] text-slate-400 font-medium mt-0.5">not submitted on time</span>
           </div>
         </div>
 
