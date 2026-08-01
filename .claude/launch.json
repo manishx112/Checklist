@@ -8,6 +8,12 @@
       "port": 5173
     },
     {
+      "name": "johndv-chat",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "E:/johndv-chat/johndv-chat", "run", "dev"],
+      "port": 3000
+    },
+    {
       "name": "item-image-lookup",
       "runtimeExecutable": "node",
       "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/2f0acdb4-8333-4ea0-9c15-4969c351606d/scratchpad/serve.js"],
