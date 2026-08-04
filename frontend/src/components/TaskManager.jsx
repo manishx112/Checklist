@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
-const WORKING_DAYS = ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+// All seven — each employee has their own weekly off (employees.off_day),
+// so Monday is valid for anyone who works Mondays.
+const WORKING_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const FREQ_LABEL = { D: 'Daily', W: 'Weekly', M: 'Monthly' }
 const FREQ_BADGE = {
   D: 'bg-blue-50 text-blue-600 border border-blue-150',

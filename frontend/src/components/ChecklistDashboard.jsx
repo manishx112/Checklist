@@ -6,7 +6,6 @@ import AdminPasswords from './AdminPasswords'
 import './ChecklistDashboard.css'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const WORKING_DAYS = ['Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 // Local-date formatter. NEVER use toISOString() here — it converts to UTC,
 // so any time before 05:30 IST resolves to the previous day and the whole
@@ -22,7 +21,9 @@ function today() {
   return toDateStr(new Date())
 }
 
-function getWeekForOffset(offsetWeeks = 0) {
+// offDay is the logged-in employee's own weekly off — Monday for most,
+// Sunday for Dinkar. Comes from employees.off_day.
+function getWeekForOffset(offsetWeeks = 0, offDay = 'Mon') {
   const now = new Date()
   const targetDate = new Date(now)
   targetDate.setDate(now.getDate() - (offsetWeeks * 7))
@@ -39,7 +40,7 @@ function getWeekForOffset(offsetWeeks = 0) {
       day: DAY_NAMES[i],
       date: toDateStr(d),
       label: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      isOff: i === 0,
+      isOff: DAY_NAMES[i] === offDay,
       isToday: d.toDateString() === now.toDateString(),
     }
   })
@@ -167,10 +168,14 @@ export default function ChecklistDashboard() {
   const [reportMode, setReportMode] = useState('week')   // 'week' | 'month'
   const [periodOffset, setPeriodOffset] = useState(0)    // 0 = current, 1 = previous
 
+  // Each employee has their own weekly off — Monday for most, Sunday for Dinkar
+  const offDay = employee?.off_day || 'Mon'
+
   // The doer checklist always shows the current week
-  const week = useMemo(() => getWeekForOffset(0), [])
+  const week = useMemo(() => getWeekForOffset(0, offDay), [offDay])
   const weekStart = week[0].date
   const weekEnd = week[6].date
+  const workingDays = useMemo(() => week.filter(w => !w.isOff).map(w => w.day), [week])
 
   const reportRange = useMemo(() => {
     if (reportMode === 'month') return getMonthForOffset(periodOffset)
@@ -187,9 +192,9 @@ export default function ChecklistDashboard() {
   const periodIsPast = periodOffset > 0
 
   useEffect(() => {
-    const today = week.find(w => w.isToday && !w.isOff)
-    setActiveDay(today ? today.day : 'Tue')
-  }, [week])
+    const todayChip = week.find(w => w.isToday && !w.isOff)
+    setActiveDay(todayChip ? todayChip.day : (workingDays[0] || 'Tue'))
+  }, [week, workingDays])
 
   useEffect(() => {
     let mounted = true
@@ -350,12 +355,12 @@ export default function ChecklistDashboard() {
 
   const dayCounts = useMemo(() => {
     const map = {}
-    WORKING_DAYS.forEach(d => {
+    workingDays.forEach(d => {
       const di = processedInstances.filter(i => i.day_name === d)
       map[d] = { total: di.length, done: di.filter(i => i.status === 'done').length }
     })
     return map
-  }, [processedInstances])
+  }, [processedInstances, workingDays])
 
   // === NEW: Weighted compliance (on-time = 1.0, late = 0.5) ===
   const weekStats = useMemo(() => {
@@ -957,8 +962,8 @@ export default function ChecklistDashboard() {
 
         {visibleInstances.length === 0 ? (
           <div className="py-20 text-center text-slate-400 text-sm font-medium bg-white border border-slate-200 md:border-none rounded-2xl md:rounded-none shadow-2xs md:shadow-none">
-            {activeDay === 'Mon'
-              ? 'Plant closed on Monday — no tasks scheduled'
+            {activeDay === offDay
+              ? `Weekly off on ${offDay} — no tasks scheduled`
               : activeFilter === 'pending'
                 ? 'All caught up! No pending tasks for this day.'
                 : 'No tasks in this view'}
