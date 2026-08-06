@@ -58,6 +58,37 @@ function getMonthForOffset(offsetMonths = 0) {
   }
 }
 
+// Work is due by 7 PM on the deadline day. Before that the day is still
+// running, so an unfinished task is NOT late yet.
+const DEADLINE_HOUR = 19
+
+// The moment a task becomes late:
+//   Daily   — 7 PM on its own day
+//   Weekly  — 7 PM six days later (the grace period)
+//   Monthly — 7 PM on the last day of its month
+function deadlineFor(row) {
+  const d = new Date(`${row.planned_date}T00:00:00`)   // local midnight, not UTC
+  if (row.frequency === 'W') {
+    d.setDate(d.getDate() + 6)
+  } else if (row.frequency === 'M') {
+    d.setMonth(d.getMonth() + 1, 0)                    // last day of that month
+  }
+  d.setHours(DEADLINE_HOUR, 0, 0, 0)
+  return d
+}
+
+function isOnTime(row) {
+  if (row.status !== 'done' || !row.submitted_at) return false
+  return new Date(row.submitted_at) <= deadlineFor(row)
+}
+
+// Can this task be judged for timeliness yet? A pending task whose deadline
+// has not arrived is neither on-time nor late — it is simply not due.
+function isAssessable(row, now = new Date()) {
+  if (row.status === 'done') return true
+  return now > deadlineFor(row)
+}
+
 function getEmployeeAvatarStyle(name) {
   const lower = name.toLowerCase();
   if (lower.includes('gopal')) {
@@ -298,47 +329,24 @@ export default function ChecklistDashboard() {
 
   // Map instances to include calculated fields in JS
   const processedInstances = useMemo(() => {
+    const now = new Date()
     const todayStr = today()
     return instances.map(row => {
-      const is_due = row.planned_date <= todayStr;
-      
-      // Calculate is_on_time
-      let is_on_time = null;
-      let days_late = 0;
+      const deadline = deadlineFor(row)
+      let days_late = 0
       if (row.status === 'done' && row.submitted_at) {
-        const planned = new Date(row.planned_date);
-        const submitted = new Date(row.submitted_at);
-        planned.setHours(0,0,0,0);
-        submitted.setHours(0,0,0,0);
-        
-        if (row.frequency === 'D') {
-          is_on_time = submitted <= planned;
-        } else if (row.frequency === 'W') {
-          const graceDate = new Date(planned);
-          graceDate.setDate(planned.getDate() + 6);
-          is_on_time = submitted <= graceDate;
-        } else if (row.frequency === 'M') {
-          is_on_time = (
-            submitted.getFullYear() === planned.getFullYear() &&
-            submitted.getMonth() === planned.getMonth()
-          );
-        }
-        
-        const diffTime = submitted - planned;
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        days_late = diffDays > 0 ? diffDays : 0;
+        const over = new Date(row.submitted_at) - deadline
+        days_late = over > 0 ? Math.ceil(over / 86400000) : 0
       }
-      
-      const is_overdue = row.status === 'pending' && row.planned_date < todayStr;
-      
       return {
         ...row,
-        is_due,
-        is_on_time,
+        is_due: row.planned_date <= todayStr,
+        is_on_time: row.status === 'done' ? isOnTime(row) : null,
+        is_assessable: isAssessable(row, now),
         days_late,
-        is_overdue
-      };
-    });
+        is_overdue: row.status === 'pending' && now > deadline,
+      }
+    })
   }, [instances]);
 
   const dayInstances = useMemo(() => {
@@ -362,20 +370,24 @@ export default function ChecklistDashboard() {
     return map
   }, [processedInstances, workingDays])
 
-  // === NEW: Weighted compliance (on-time = 1.0, late = 0.5) ===
   const weekStats = useMemo(() => {
     const total = processedInstances.length
     const dueInstances = processedInstances.filter(i => i.is_due)
     const dueCount = dueInstances.length
-    const onTime = dueInstances.filter(i => i.status === 'done' && i.is_on_time === true).length
     const late = dueInstances.filter(i => i.status === 'done' && i.is_on_time === false).length
     const done = dueInstances.filter(i => i.status === 'done').length
     const pending = dueInstances.filter(i => i.status === 'pending').length
     const missed = dueInstances.filter(i => i.status === 'missed').length
-    
-    // Box 1 — how much of the planned work was NOT finished on time.
-    // Counts both work never done and work done late.
-    const pctNotOnTime = dueCount > 0 ? Math.round(((dueCount - onTime) / dueCount) * 100) : 0
+
+    // Only work whose 7 PM deadline has passed (or that is already done) can
+    // be judged. Today's unfinished tasks are excluded until 7 PM.
+    const assessable = dueInstances.filter(i => i.is_assessable)
+    const onTime = assessable.filter(i => i.is_on_time === true).length
+
+    // Box 1 — of the work that CAN be judged, how much missed its deadline
+    const pctNotOnTime = assessable.length > 0
+      ? Math.round(((assessable.length - onTime) / assessable.length) * 100)
+      : 0
 
     // Box 2 — how much of the planned work is finished, on time or late.
     const pctCompleted = dueCount > 0 ? Math.round((done / dueCount) * 100) : 0
@@ -396,6 +408,7 @@ export default function ChecklistDashboard() {
   const compiledReports = useMemo(() => {
     if (!adminEmployees.length) return []
     const todayStr = today()
+    const now = new Date()
 
     return adminEmployees
       .filter(emp => emp.role === 'doer') // exclude owner/admins — they don't have tasks
@@ -409,32 +422,16 @@ export default function ChecklistDashboard() {
       
       const plan = dueInsts.length
       const done = dueInsts.filter(i => i.status === 'done').length
-      
-      const onTime = dueInsts.filter(i => {
-        if (i.status !== 'done' || !i.submitted_at) return false
-        
-        const planned = new Date(i.planned_date)
-        const submitted = new Date(i.submitted_at)
-        planned.setHours(0,0,0,0)
-        submitted.setHours(0,0,0,0)
-        
-        if (i.frequency === 'D') {
-          return submitted <= planned
-        } else if (i.frequency === 'W') {
-          const graceDate = new Date(planned)
-          graceDate.setDate(planned.getDate() + 6)
-          return submitted <= graceDate
-        } else if (i.frequency === 'M') {
-          return (
-            submitted.getFullYear() === planned.getFullYear() &&
-            submitted.getMonth() === planned.getMonth()
-          )
-        }
-        return false
-      }).length
-      
+
+      // Same 7 PM rule as the employee dashboard — today's unfinished work
+      // is not judged until the deadline passes.
+      const assessable = dueInsts.filter(i => isAssessable(i, now))
+      const onTime = assessable.filter(i => isOnTime(i)).length
+
       const pctWorkNotDone = plan > 0 ? ((done - plan) / plan) * 100 : -100.00
-      const pctNotOnTime = plan > 0 ? ((onTime - plan) / plan) * 100 : -100.00
+      const pctNotOnTime = assessable.length > 0
+        ? ((onTime - assessable.length) / assessable.length) * 100
+        : 0
       
       return {
         emp_id: emp.emp_id,
