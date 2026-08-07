@@ -58,23 +58,29 @@ function getMonthForOffset(offsetMonths = 0) {
   }
 }
 
-// Work is due by 7 PM on the deadline day. Before that the day is still
-// running, so an unfinished task is NOT late yet.
-const DEADLINE_HOUR = 19
+// Used when a task has no deadline_time of its own
+const DEFAULT_DEADLINE = '19:00:00'
 
-// The moment a task becomes late:
-//   Daily   — 7 PM on its own day
-//   Weekly  — 7 PM six days later (the grace period)
-//   Monthly — 7 PM on the last day of its month
+// A task is due at ITS OWN deadline_time on its planned day — 7 PM unless
+// the admin set something else. Frequency makes no difference: daily, weekly
+// and monthly all work the same way.
+//
+// Separate from this: a task stays SUBMITTABLE for days afterwards (see
+// mark_missed_instances in the database). Being able to finish it late does
+// not make it on time.
 function deadlineFor(row) {
   const d = new Date(`${row.planned_date}T00:00:00`)   // local midnight, not UTC
-  if (row.frequency === 'W') {
-    d.setDate(d.getDate() + 6)
-  } else if (row.frequency === 'M') {
-    d.setMonth(d.getMonth() + 1, 0)                    // last day of that month
-  }
-  d.setHours(DEADLINE_HOUR, 0, 0, 0)
+  const [h, m] = (row.deadline_time || DEFAULT_DEADLINE).split(':')
+  d.setHours(Number(h), Number(m) || 0, 0, 0)
   return d
+}
+
+// "19:00:00" -> "7:00 PM"
+function formatDeadline(t) {
+  const [h, m] = (t || DEFAULT_DEADLINE).split(':')
+  const d = new Date()
+  d.setHours(Number(h), Number(m) || 0, 0, 0)
+  return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
 }
 
 function isOnTime(row) {
@@ -82,10 +88,12 @@ function isOnTime(row) {
   return new Date(row.submitted_at) <= deadlineFor(row)
 }
 
-// Can this task be judged for timeliness yet? A pending task whose deadline
-// has not arrived is neither on-time nor late — it is simply not due.
+// Can this task be judged for timeliness yet?
+// Purely a question of the clock, NOT of status: until the deadline passes,
+// the task is out of the "% not on time" pool whether it is done or not.
+// So on Friday afternoon the whole of Friday is excluded, and the figure
+// reflects Tue–Thu only. At 7 PM Friday joins in.
 function isAssessable(row, now = new Date()) {
-  if (row.status === 'done') return true
   return now > deadlineFor(row)
 }
 
@@ -379,14 +387,18 @@ export default function ChecklistDashboard() {
     const pending = dueInstances.filter(i => i.status === 'pending').length
     const missed = dueInstances.filter(i => i.status === 'missed').length
 
-    // Only work whose 7 PM deadline has passed (or that is already done) can
-    // be judged. Today's unfinished tasks are excluded until 7 PM.
-    const assessable = dueInstances.filter(i => i.is_assessable)
-    const onTime = assessable.filter(i => i.is_on_time === true).length
+    // Raw count for the "On Time" card — every task finished within its
+    // deadline, including work done earlier today.
+    const onTime = dueInstances.filter(i => i.status === 'done' && i.is_on_time === true).length
 
-    // Box 1 — of the work that CAN be judged, how much missed its deadline
+    // The percentage only looks at finished days: every task whose 7 PM
+    // deadline has passed. Today is excluded entirely until 7 PM, done or not.
+    const assessable = dueInstances.filter(i => i.is_assessable)
+    const onTimeAssessed = assessable.filter(i => i.is_on_time === true).length
+
+    // Box 1 — of the days already closed, how much missed its deadline
     const pctNotOnTime = assessable.length > 0
-      ? Math.round(((assessable.length - onTime) / assessable.length) * 100)
+      ? Math.round(((assessable.length - onTimeAssessed) / assessable.length) * 100)
       : 0
 
     // Box 2 — how much of the planned work is finished, on time or late.
@@ -422,15 +434,16 @@ export default function ChecklistDashboard() {
       
       const plan = dueInsts.length
       const done = dueInsts.filter(i => i.status === 'done').length
+      const onTime = dueInsts.filter(i => isOnTime(i)).length
 
-      // Same 7 PM rule as the employee dashboard — today's unfinished work
-      // is not judged until the deadline passes.
+      // Same rule as the employee dashboard: only days whose 7 PM deadline
+      // has passed are judged. Today is excluded until 7 PM, done or not.
       const assessable = dueInsts.filter(i => isAssessable(i, now))
-      const onTime = assessable.filter(i => isOnTime(i)).length
+      const onTimeAssessed = assessable.filter(i => isOnTime(i)).length
 
       const pctWorkNotDone = plan > 0 ? ((done - plan) / plan) * 100 : -100.00
       const pctNotOnTime = assessable.length > 0
-        ? ((onTime - assessable.length) / assessable.length) * 100
+        ? ((onTimeAssessed - assessable.length) / assessable.length) * 100
         : 0
       
       return {
@@ -999,6 +1012,8 @@ export default function ChecklistDashboard() {
                     </span>
                     <span className="text-[10px] text-slate-400 font-semibold">
                       {new Date(row.planned_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                      {' · by '}
+                      <span className="text-slate-500 font-bold">{formatDeadline(row.deadline_time)}</span>
                     </span>
                   </span>
                 </div>
@@ -1020,8 +1035,13 @@ export default function ChecklistDashboard() {
                 </div>
 
                 {/* Desktop-only Planned Date (Desktop: Col 5, Mobile: Hidden) */}
-                <div className="hidden md:block text-xs text-slate-500 font-medium">
-                  {new Date(row.planned_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                <div className="hidden md:flex flex-col leading-tight">
+                  <span className="text-xs text-slate-600 font-semibold">
+                    {new Date(row.planned_date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-bold">
+                    by {formatDeadline(row.deadline_time)}
+                  </span>
                 </div>
 
                 {/* Status (Mobile: Row 1-2 Col 3, Desktop: Col 6) */}

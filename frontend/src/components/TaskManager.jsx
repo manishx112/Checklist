@@ -24,6 +24,7 @@ const emptyForm = () => ({
   department: '',
   assigned_to: '',
   frequency: 'D',
+  deadline_time: '19:00',
   scheduled_day: '',
   scheduled_day_of_month: '',
   effective_from: todayStr(),
@@ -54,10 +55,19 @@ function nextTaskCode(tasks) {
   return 'T' + (Math.max(highest, 1000) + 1)
 }
 
+// "19:00:00" -> "7:00 PM"
+function formatDeadline(t) {
+  const [h, m] = (t || '19:00:00').split(':')
+  const d = new Date()
+  d.setHours(Number(h), Number(m) || 0, 0, 0)
+  return d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true })
+}
+
 function scheduleText(t) {
-  if (t.frequency === 'D') return 'Every working day'
-  if (t.frequency === 'W') return `Every ${t.scheduled_day}`
-  if (t.frequency === 'M') return `Day ${t.scheduled_day_of_month} of month`
+  const due = ` · due by ${formatDeadline(t.deadline_time)}`
+  if (t.frequency === 'D') return `Every working day${due}`
+  if (t.frequency === 'W') return `Every ${t.scheduled_day}${due}`
+  if (t.frequency === 'M') return `Day ${t.scheduled_day_of_month} of month${due}`
   return ''
 }
 
@@ -144,6 +154,7 @@ export default function TaskManager() {
       department: t.department,
       assigned_to: String(t.assigned_to),
       frequency: t.frequency,
+      deadline_time: (t.deadline_time || '19:00:00').slice(0, 5),
       scheduled_day: t.scheduled_day || '',
       scheduled_day_of_month: t.scheduled_day_of_month != null ? String(t.scheduled_day_of_month) : '',
       effective_from: t.effective_from,
@@ -195,6 +206,7 @@ export default function TaskManager() {
       department: form.department.trim(),
       assigned_to: Number(form.assigned_to),
       frequency: form.frequency,
+      deadline_time: form.deadline_time || '19:00',
       scheduled_day: form.frequency === 'W' ? form.scheduled_day : null,
       scheduled_day_of_month: form.frequency === 'M' ? Number(form.scheduled_day_of_month) : null,
       effective_from: form.effective_from,
@@ -461,6 +473,22 @@ export default function TaskManager() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Deadline time — applies to every frequency */}
+              <div>
+                <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Deadline Time <span className="text-slate-300 normal-case font-semibold">(due by)</span>
+                </label>
+                <input
+                  type="time"
+                  value={form.deadline_time}
+                  onChange={e => updateField('deadline_time', e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50/50 border border-slate-200 rounded-xl text-slate-800 text-sm focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/15 focus:border-indigo-500 transition"
+                />
+                <p className="text-[11px] text-slate-400 font-medium mt-1.5">
+                  Submitted at or before this time on the planned day counts as On Time. Default 7:00 PM.
+                </p>
               </div>
 
               {/* Conditional schedule fields */}
