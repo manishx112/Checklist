@@ -97,6 +97,28 @@ function isAssessable(row, now = new Date()) {
   return now > deadlineFor(row)
 }
 
+const FREQ_LABEL = { D: 'Daily', W: 'Weekly', M: 'Monthly' }
+
+const sumBy = (rows, key) => rows.reduce((n, r) => n + r[key], 0)
+
+// Build a CSV and hand it to the browser. BOM included so Excel opens the
+// UTF-8 correctly instead of mangling names.
+function downloadCsv(filename, rows) {
+  const esc = v => {
+    const s = v === null || v === undefined ? '' : String(v)
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const csv = '﻿' + rows.map(r => (r || []).map(esc).join(',')).join('\r\n')
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
 function getEmployeeAvatarStyle(name) {
   const lower = name.toLowerCase();
   if (lower.includes('gopal')) {
@@ -449,14 +471,117 @@ export default function ChecklistDashboard() {
       return {
         emp_id: emp.emp_id,
         full_name: emp.full_name,
+        department: emp.department,
         plan,
         actual: done,
         onTime,
+        assessed: assessable.length,   // deadline already passed
+        onTimeAssessed,                // …and finished within it
         pctWorkNotDone,
         pctNotOnTime
       }
     })
   }, [adminEmployees, adminInstances, periodIsPast])
+
+  // Task-by-task export so a disputed number can be checked line by line
+  function downloadEmployeeReport(row) {
+    const now = new Date()
+    const todayStr = today()
+    const detail = adminInstances
+      .filter(i => i.assigned_to === row.emp_id)
+      // Same cut-off the on-screen report uses. Without this the file would
+      // list days that have not happened yet as "0 completed", and the day
+      // rows would not add up to the totals.
+      .filter(i => periodIsPast || i.planned_date <= todayStr)
+      .sort((a, b) =>
+        a.planned_date.localeCompare(b.planned_date) || a.task_code.localeCompare(b.task_code))
+
+    const pct = row.assessed > 0
+      ? Math.round(((row.assessed - row.onTimeAssessed) / row.assessed) * 100)
+      : 0
+
+    // Day-by-day roll-up, in date order
+    const byDay = []
+    const dayMap = new Map()
+    for (const i of detail) {
+      if (!dayMap.has(i.planned_date)) {
+        const entry = { date: i.planned_date, day: i.day_name, planned: 0, done: 0, onTime: 0, assessed: 0, notOnTime: 0 }
+        dayMap.set(i.planned_date, entry)
+        byDay.push(entry)
+      }
+      const e = dayMap.get(i.planned_date)
+      const ok = isOnTime(i)
+      e.planned++
+      if (i.status === 'done') e.done++
+      if (ok) e.onTime++
+      if (isAssessable(i, now)) {
+        e.assessed++
+        if (!ok) e.notOnTime++
+      }
+    }
+
+    const lines = [
+      ['ExactChoice Checklist — Employee Report'],
+      ['Employee', row.full_name],
+      ['Department', row.department || ''],
+      ['Period', reportRange.label],
+      ['Dates', reportRange.start, 'to', reportRange.end],
+      ['Generated', now.toLocaleString('en-IN')],
+      [],
+      ['SUMMARY'],
+      ['Tasks planned so far', row.plan],
+      ['Tasks completed', row.actual],
+      ['Completed on time', row.onTime],
+      [],
+      ['Deadline already passed', row.assessed],
+      ['…of those, done on time', row.onTimeAssessed],
+      ['…of those, not on time', row.assessed - row.onTimeAssessed],
+      ['% Not On Time', `${pct}%`, `= ${row.assessed - row.onTimeAssessed} / ${row.assessed}`],
+      [],
+      ['Note', "Tasks whose deadline has not yet passed are excluded from the % — they are not late yet."],
+      [],
+      ['DAY-WISE SUMMARY'],
+      ['Date', 'Day', 'Planned', 'Completed', 'On Time', 'Deadline Passed', 'Not On Time'],
+      ...byDay.map(d => [d.date, d.day, d.planned, d.done, d.onTime, d.assessed, d.notOnTime]),
+      // Summed from the rows above so the column can never disagree with them
+      ['TOTAL', '',
+        sumBy(byDay, 'planned'), sumBy(byDay, 'done'), sumBy(byDay, 'onTime'),
+        sumBy(byDay, 'assessed'), sumBy(byDay, 'notOnTime')],
+      [],
+      ['TASK DETAIL'],
+      ['Task Code', 'Task Name', 'Frequency', 'Planned Date', 'Day', 'Due By',
+       'Status', 'Submitted At', 'Result', 'Days Late'],
+      ...detail.map(i => {
+        const dl = deadlineFor(i)
+        const onTime = isOnTime(i)
+        let result
+        if (i.status === 'done') result = onTime ? 'On Time' : 'Late'
+        else if (now > dl) result = 'Not done — deadline passed'
+        else result = 'Pending — deadline not reached'
+
+        let daysLate = ''
+        if (i.status === 'done' && !onTime) {
+          daysLate = Math.max(1, Math.ceil((new Date(i.submitted_at) - dl) / 86400000))
+        }
+
+        return [
+          i.task_code,
+          i.task_name,
+          FREQ_LABEL[i.frequency] || i.frequency,
+          i.planned_date,
+          i.day_name,
+          formatDeadline(i.deadline_time),
+          i.status,
+          i.submitted_at ? new Date(i.submitted_at).toLocaleString('en-IN') : '',
+          result,
+          daysLate,
+        ]
+      }),
+    ]
+
+    const safeName = row.full_name.replace(/[^a-z0-9]+/gi, '_')
+    downloadCsv(`${safeName}_${reportRange.start}_to_${reportRange.end}.csv`, lines)
+  }
 
   const filterCounts = useMemo(() => ({
     pending: dayInstances.filter(i => i.status === 'pending').length,
@@ -685,20 +810,21 @@ export default function ChecklistDashboard() {
           ) : (
             <div className="bg-white border border-slate-200 rounded-3xl overflow-hidden shadow-2xs">
               <div className="w-full overflow-x-auto no-scrollbar animate-fade-in">
-                <div className="grid grid-cols-[1.5fr_1.5fr_1fr_1.2fr_1.2fr] gap-4 p-4 bg-slate-50/80 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider items-center min-w-[750px]">
+                <div className="grid grid-cols-[1.5fr_1.5fr_1fr_1.2fr_1.2fr_auto] gap-4 p-4 bg-slate-50/80 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider items-center min-w-[850px]">
                   <div>Employee</div>
                   <div>Actual / Plan</div>
                   <div className="text-center">On Time</div>
                   <div className="text-center">% Work Not Done</div>
                   <div className="text-center">% Not On Time</div>
+                  <div className="text-center">Report</div>
                 </div>
-                <div className="min-w-[750px] divide-y divide-slate-100">
+                <div className="min-w-[850px] divide-y divide-slate-100">
                   {compiledReports.map((row, idx) => {
                     const avatar = getEmployeeAvatarStyle(row.full_name);
                     return (
                       <div
                         key={row.emp_id}
-                        className={`grid grid-cols-[1.5fr_1.5fr_1fr_1.2fr_1.2fr] items-center gap-4 p-4 hover:bg-slate-50/60 transition-colors ${
+                        className={`grid grid-cols-[1.5fr_1.5fr_1fr_1.2fr_1.2fr_auto] items-center gap-4 p-4 hover:bg-slate-50/60 transition-colors ${
                           idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/10'
                         }`}
                       >
@@ -741,6 +867,20 @@ export default function ChecklistDashboard() {
                           <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${getDeviationBadgeClass(row.pctNotOnTime)}`}>
                             {row.pctNotOnTime.toFixed(2)}%
                           </span>
+                        </div>
+
+                        {/* Download */}
+                        <div className="text-center">
+                          <button
+                            onClick={() => downloadEmployeeReport(row)}
+                            title={`Download ${row.full_name}'s task-by-task report for ${reportRange.label}`}
+                            className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-xs font-bold text-slate-700 transition active:scale-95 cursor-pointer whitespace-nowrap"
+                          >
+                            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            Download
+                          </button>
                         </div>
                       </div>
                     );

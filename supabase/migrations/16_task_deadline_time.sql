@@ -42,9 +42,11 @@ SELECT
   ti.status,
   ti.submitted_at,
   ti.remarks,
+  -- planned_date + deadline_time is a naive timestamp. Supabase runs on UTC,
+  -- so it must be anchored to IST or every deadline reads 5.5 hours early.
   CASE
     WHEN ti.status = 'pending'
-     AND (ti.planned_date + t.deadline_time) < NOW() THEN TRUE
+     AND ((ti.planned_date + t.deadline_time) AT TIME ZONE 'Asia/Kolkata') < NOW() THEN TRUE
     ELSE FALSE
   END AS is_overdue
 FROM public.task_instances ti

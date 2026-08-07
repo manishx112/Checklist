@@ -30,3 +30,5 @@ out/
 *.sw?
 .DS_Store
 Thumbs.db
+*.timestamp-*.mjs
+
