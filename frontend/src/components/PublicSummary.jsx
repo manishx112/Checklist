@@ -9,10 +9,19 @@ import { supabase } from '../lib/supabase'
 
 const REFRESH_MS = 5 * 60 * 1000
 
+// Lateness — lower is better
 function badgeClass(pct) {
   if (pct <= 10) return 'bg-emerald-50 text-emerald-700 border-emerald-200'
   if (pct <= 25) return 'bg-amber-50 text-amber-700 border-amber-200'
   if (pct <= 50) return 'bg-orange-50 text-orange-700 border-orange-200'
+  return 'bg-rose-50 text-rose-700 border-rose-200'
+}
+
+// Completion — higher is better, so the colours run the other way
+function completionClass(pct) {
+  if (pct >= 90) return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  if (pct >= 70) return 'bg-lime-50 text-lime-700 border-lime-200'
+  if (pct >= 50) return 'bg-amber-50 text-amber-700 border-amber-200'
   return 'bg-rose-50 text-rose-700 border-rose-200'
 }
 
@@ -88,18 +97,19 @@ export default function PublicSummary() {
       ) : (
         <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
           <div className="overflow-x-auto">
-            <div className="grid grid-cols-[1.6fr_1.4fr_.8fr_1.1fr] gap-3 p-3 bg-slate-50/80 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider items-center min-w-[560px]">
+            <div className="grid grid-cols-[1.6fr_1.4fr_.8fr_1fr_1.1fr] gap-3 p-3 bg-slate-50/80 border-b border-slate-200 text-[10px] font-bold text-slate-400 uppercase tracking-wider items-center min-w-[680px]">
               <div>Employee</div>
               <div>Done / Plan</div>
               <div className="text-center">On Time</div>
+              <div className="text-center">Completion</div>
               <div className="text-center">Not On Time</div>
             </div>
 
-            <div className="min-w-[560px] divide-y divide-slate-100">
+            <div className="min-w-[680px] divide-y divide-slate-100">
               {rows.map((r, i) => (
                 <div
                   key={r.full_name}
-                  className={`grid grid-cols-[1.6fr_1.4fr_.8fr_1.1fr] items-center gap-3 p-3 ${
+                  className={`grid grid-cols-[1.6fr_1.4fr_.8fr_1fr_1.1fr] items-center gap-3 p-3 ${
                     i % 2 ? 'bg-slate-50/20' : 'bg-white'
                   }`}
                 >
@@ -129,12 +139,15 @@ export default function PublicSummary() {
                   <div className="text-center font-black text-slate-800 text-sm">{r.on_time}</div>
 
                   <div className="text-center">
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold border ${completionClass(r.pct_completed)}`}>
+                      {r.pct_completed}%
+                    </span>
+                  </div>
+
+                  <div className="text-center">
                     <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-bold border ${badgeClass(r.pct_not_on_time)}`}>
                       {r.pct_not_on_time}%
                     </span>
-                    <div className="text-[9px] text-slate-400 font-semibold mt-0.5">
-                      of {r.assessed} judged
-                    </div>
                   </div>
                 </div>
               ))}
