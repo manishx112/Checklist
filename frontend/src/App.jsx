@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { supabase } from './lib/supabase'
 import ChecklistDashboard from './components/ChecklistDashboard'
 import PublicSummary from './components/PublicSummary'
@@ -98,7 +99,12 @@ function LoginScreen() {
 // Split in two so no hook is ever called conditionally: App itself holds no
 // state, and the authenticated branch lives in its own component.
 export default function App() {
-  return isEmbed ? <PublicSummary /> : <AuthedApp />
+  return (
+    <>
+      {isEmbed ? <PublicSummary /> : <AuthedApp />}
+      <Analytics />
+    </>
+  )
 }
 
 function AuthedApp() {
