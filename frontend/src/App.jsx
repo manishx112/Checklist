@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from './lib/supabase'
 import ChecklistDashboard from './components/ChecklistDashboard'
+import PublicSummary from './components/PublicSummary'
 import './components/ChecklistDashboard.css'
+
+// ?embed=1 renders the public team summary with no login at all.
+// Reads only public_team_summary, an aggregate view granted to `anon`.
+const isEmbed = new URLSearchParams(window.location.search).get('embed') === '1'
 
 function LoginScreen() {
   const [email, setEmail] = useState('')
@@ -90,7 +95,13 @@ function LoginScreen() {
   )
 }
 
+// Split in two so no hook is ever called conditionally: App itself holds no
+// state, and the authenticated branch lives in its own component.
 export default function App() {
+  return isEmbed ? <PublicSummary /> : <AuthedApp />
+}
+
+function AuthedApp() {
   const [session, setSession] = useState(null)
   const [checking, setChecking] = useState(true)
 
