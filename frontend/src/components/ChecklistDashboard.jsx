@@ -89,11 +89,16 @@ function isOnTime(row) {
 }
 
 // Can this task be judged for timeliness yet?
-// Purely a question of the clock, NOT of status: until the deadline passes,
-// the task is out of the "% not on time" pool whether it is done or not.
-// So on Friday afternoon the whole of Friday is excluded, and the figure
-// reflects Tue–Thu only. At 7 PM Friday joins in.
+//
+// A FINISHED task is always judgeable — it was submitted either before its
+// deadline or after, and waiting for 7 PM cannot change that. Counting it
+// straight away is what stops "2 tasks on time" sitting next to "100% not
+// on time" for the rest of the afternoon.
+//
+// An UNFINISHED task waits for its deadline. Until then it is not late yet,
+// so it stays out of the pool and nobody is penalised for work still in hand.
 function isAssessable(row, now = new Date()) {
+  if (row.status === 'done') return true
   return now > deadlineFor(row)
 }
 

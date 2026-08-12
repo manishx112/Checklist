@@ -38,6 +38,12 @@
       "port": 8321
     },
     {
+      "name": "ladies-lot-dash-4777",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/62f2ecb3-39fa-4d6f-be61-1292d4d35710/scratchpad/lot-server.js"],
+      "port": 4777
+    },
+    {
       "name": "ladies-lot-dash",
       "runtimeExecutable": "node",
       "runtimeArgs": ["C:/Users/Admin/AppData/Local/Temp/claude/E--checklist-system/6bceccf7-4e52-4b2d-ad73-af0086fe9996/scratchpad/static-server.js"],
