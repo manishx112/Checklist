@@ -9,6 +9,9 @@ import './ChecklistDashboard.css'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// ?debug=1 shows what the Company Report was actually handed. Temporary.
+const DEBUG = new URLSearchParams(window.location.search).get('debug') === '1'
+
 // Local-date formatter. NEVER use toISOString() here — it converts to UTC,
 // so any time before 05:30 IST resolves to the previous day and the whole
 // dashboard shows yesterday.
@@ -122,8 +125,10 @@ function isAssessable(row, now = new Date()) {
 async function fetchAllInstances(startDate, endDate) {
   const all = []
   let total = null
+  let pages = 0
 
   for (;;) {
+    pages++
     const { data, error, count } = await supabase
       .from('weekly_dashboard')
       .select('*', { count: 'exact' })
@@ -141,7 +146,7 @@ async function fetchAllInstances(startDate, endDate) {
     if (all.length >= total) break
   }
 
-  return all
+  return { rows: all, serverCount: total, pages, askedFor: { startDate, endDate } }
 }
 
 const FREQ_LABEL = { D: 'Daily', W: 'Weekly', M: 'Monthly' }
@@ -272,6 +277,7 @@ export default function ChecklistDashboard() {
   const [adminInstances, setAdminInstances] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
   const adminFetchRef = useRef(0)   // newest report request wins
+  const [adminDiag, setAdminDiag] = useState(null)   // shown only with ?debug=1
 
   // Company Report period — independent of the doer checklist, which is
   // always the current week.
@@ -408,12 +414,27 @@ export default function ChecklistDashboard() {
 
       if (empErr) throw empErr
 
-      const insts = await fetchAllInstances(reportRange.start, reportRange.end)
+      const fetched = await fetchAllInstances(reportRange.start, reportRange.end)
 
       if (ticket !== adminFetchRef.current) return   // a newer request won
 
       setAdminEmployees(emps || [])
-      setAdminInstances(insts)
+      setAdminInstances(fetched.rows)
+      setAdminDiag({
+        ticket,
+        askedFor: fetched.askedFor,
+        serverCount: fetched.serverCount,
+        received: fetched.rows.length,
+        pages: fetched.pages,
+        dateSpan: fetched.rows.length
+          ? [
+              fetched.rows.reduce((m, r) => (r.planned_date < m ? r.planned_date : m), fetched.rows[0].planned_date),
+              fetched.rows.reduce((m, r) => (r.planned_date > m ? r.planned_date : m), fetched.rows[0].planned_date),
+            ]
+          : null,
+        futureRows: fetched.rows.filter(r => r.planned_date > today()).length,
+        at: new Date().toLocaleTimeString('en-IN'),
+      })
     } catch (err) {
       if (ticket === adminFetchRef.current) setError(err.message)
     } finally {
@@ -941,6 +962,32 @@ export default function ChecklistDashboard() {
               </button>
             </div>
           </div>
+
+          {/* Temporary. Add ?debug=1 to the URL to see exactly what the report
+              was given. Delete this block once the cause is confirmed. */}
+          {DEBUG && adminDiag && (
+            <div className="p-4 bg-slate-900 text-slate-100 rounded-2xl font-mono text-[11px] leading-relaxed overflow-x-auto">
+              <div className="font-bold text-amber-400 mb-2">REPORT DIAGNOSTIC · fetched {adminDiag.at}</div>
+              <div>screen shows ....... {reportMode === 'month' ? 'Monthly' : 'Weekly'} · {periodOffset === 0 ? 'current' : 'previous'} · {reportRange.start} → {reportRange.end}</div>
+              <div>data was asked for . {adminDiag.askedFor.startDate} → {adminDiag.askedFor.endDate}
+                <span className={adminDiag.askedFor.startDate === reportRange.start && adminDiag.askedFor.endDate === reportRange.end ? ' text-emerald-400' : ' text-rose-400 font-bold'}>
+                  {adminDiag.askedFor.startDate === reportRange.start && adminDiag.askedFor.endDate === reportRange.end ? '  ✓ matches' : '  ✗ MISMATCH — stale data on screen'}
+                </span>
+              </div>
+              <div>dates actually in it {adminDiag.dateSpan ? `${adminDiag.dateSpan[0]} → ${adminDiag.dateSpan[1]}` : '(none)'}</div>
+              <div>rows ............... received {adminDiag.received} of {adminDiag.serverCount} on server, in {adminDiag.pages} page(s)
+                <span className={adminDiag.received === adminDiag.serverCount ? ' text-emerald-400' : ' text-rose-400 font-bold'}>
+                  {adminDiag.received === adminDiag.serverCount ? '  ✓ complete' : '  ✗ TRUNCATED'}
+                </span>
+              </div>
+              <div>future-dated rows .. {adminDiag.futureRows} (after {today()})
+                <span className="text-slate-400"> · counted in plan? {periodIsPast ? 'YES — periodIsPast=true' : 'no'}</span>
+              </div>
+              <div className="mt-2 text-slate-400">
+                per employee (plan/done): {compiledReports.map(r => `${r.full_name.split(/[\s_]/)[0]} ${r.plan}/${r.actual}`).join('  ·  ')}
+              </div>
+            </div>
+          )}
 
           {adminLoading ? (
             <div className="flex justify-center items-center py-20 text-slate-500 font-medium font-sans">
