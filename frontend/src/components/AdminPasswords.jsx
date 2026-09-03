@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchAll } from '../lib/fetchAll'
 
 const MIN_LENGTH = 8
 
@@ -27,13 +28,18 @@ export default function AdminPasswords() {
   const fetchEmployees = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase
-      .from('employees')
-      .select('emp_id, emp_code, full_name, department, role, auth_user_id')
-      .eq('is_active', true)
-      .order('emp_code')
-    if (err) setError(err.message)
-    else setEmployees(data || [])
+    try {
+      const data = await fetchAll(
+        () => supabase
+          .from('employees')
+          .select('emp_id, emp_code, full_name, department, role, auth_user_id', { count: 'exact' })
+          .eq('is_active', true),
+        { orderBy: 'emp_code' },
+      )
+      setEmployees(data)
+    } catch (err) {
+      setError(err.message)
+    }
     setLoading(false)
   }, [])
 

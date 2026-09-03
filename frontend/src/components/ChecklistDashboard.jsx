@@ -5,6 +5,7 @@ import ChangePassword from './ChangePassword'
 import AdminPasswords from './AdminPasswords'
 import EmployeeManager from './EmployeeManager'
 import HolidayManager from './HolidayManager'
+import { fetchAll, fetchAllRpc } from '../lib/fetchAll'
 import './ChecklistDashboard.css'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -105,48 +106,6 @@ function isOnTime(row) {
 function isAssessable(row, now = new Date()) {
   if (row.status === 'done') return true
   return now > deadlineFor(row)
-}
-
-// Every row of weekly_dashboard in a date range, however many there are.
-//
-// PostgREST caps how many rows one response may carry (Supabase's default is
-// 1000) and silently returns a TRUNCATED set — no error, no warning. The
-// report is a set of counts, so a short read does not look broken, it just
-// quietly reports numbers that are too low.
-//
-// It was also unordered, and without ORDER BY PostgreSQL may return rows in a
-// different physical order each time, so a different slice fell off the end
-// on every load. That is why an employee could vanish from the report and
-// come back after a refresh — the newest employee's rows sit at the end of
-// the table and were the first to be cut.
-//
-// Paging by however many rows actually came back means this is correct
-// whatever the server's cap is set to.
-async function fetchAllInstances(startDate, endDate) {
-  const all = []
-  let total = null
-  let pages = 0
-
-  for (;;) {
-    pages++
-    const { data, error, count } = await supabase
-      .from('weekly_dashboard')
-      .select('*', { count: 'exact' })
-      .gte('planned_date', startDate)
-      .lte('planned_date', endDate)
-      .order('instance_id')                       // stable paging needs a stable order
-      .range(all.length, all.length + 999)
-
-    if (error) throw error
-    if (total === null) total = count ?? 0
-
-    const got = data?.length || 0
-    if (got === 0) break                          // nothing more, or cap is 0
-    all.push(...data)
-    if (all.length >= total) break
-  }
-
-  return { rows: all, serverCount: total, pages, askedFor: { startDate, endDate } }
 }
 
 const FREQ_LABEL = { D: 'Daily', W: 'Weekly', M: 'Monthly' }
@@ -274,7 +233,7 @@ export default function ChecklistDashboard() {
   // view: 'checklist' (doers) | 'report' (admin/viewer default) | 'tasks' (admin only)
   const [view, setView] = useState('checklist')
   const [adminEmployees, setAdminEmployees] = useState([])
-  const [adminInstances, setAdminInstances] = useState([])
+  const [reportRows, setReportRows] = useState([])   // one aggregated row per employee
   const [adminLoading, setAdminLoading] = useState(false)
   const adminFetchRef = useRef(0)   // newest report request wins
   const [adminDiag, setAdminDiag] = useState(null)   // shown only with ?debug=1
@@ -359,15 +318,20 @@ export default function ChecklistDashboard() {
     if (!employee) return
     setLoading(true)
     setError(null)
-    const { data, error: fetchErr } = await supabase
-      .from('weekly_dashboard')
-      .select('*')
-      .eq('assigned_to', employee.emp_id)
-      .gte('planned_date', weekStart)
-      .lte('planned_date', weekEnd)
-      .order('task_code')
-    if (fetchErr) setError(fetchErr.message)
-    else setInstances(data || [])
+    // 100 tasks a day over a week is 700 rows — under today's cap, but not
+    // by much, and a silent truncation here would hide tasks from the person
+    // who has to do them.
+    try {
+      const data = await fetchAll(() => supabase
+        .from('weekly_dashboard')
+        .select('*', { count: 'exact' })
+        .eq('assigned_to', employee.emp_id)
+        .gte('planned_date', weekStart)
+        .lte('planned_date', weekEnd))
+      setInstances(data)
+    } catch (fetchErr) {
+      setError(fetchErr.message)
+    }
     setLoading(false)
   }, [employee, weekStart, weekEnd])
 
@@ -414,25 +378,22 @@ export default function ChecklistDashboard() {
 
       if (empErr) throw empErr
 
-      const fetched = await fetchAllInstances(reportRange.start, reportRange.end)
+      // One row per employee, counted in the database. The browser never
+      // sees the underlying instances, so this costs the same whether the
+      // period holds 1,500 rows or 1.5 million.
+      const rows = await fetchAllRpc('report_summary', {
+        p_start: reportRange.start,
+        p_end: reportRange.end,
+      })
 
       if (ticket !== adminFetchRef.current) return   // a newer request won
 
       setAdminEmployees(emps || [])
-      setAdminInstances(fetched.rows)
+      setReportRows(rows)
       setAdminDiag({
-        ticket,
-        askedFor: fetched.askedFor,
-        serverCount: fetched.serverCount,
-        received: fetched.rows.length,
-        pages: fetched.pages,
-        dateSpan: fetched.rows.length
-          ? [
-              fetched.rows.reduce((m, r) => (r.planned_date < m ? r.planned_date : m), fetched.rows[0].planned_date),
-              fetched.rows.reduce((m, r) => (r.planned_date > m ? r.planned_date : m), fetched.rows[0].planned_date),
-            ]
-          : null,
-        futureRows: fetched.rows.filter(r => r.planned_date > today()).length,
+        askedFor: { startDate: reportRange.start, endDate: reportRange.end },
+        employees: rows.length,
+        totalPlanned: rows.reduce((n, r) => n + r.plan, 0),
         at: new Date().toLocaleTimeString('en-IN'),
       })
     } catch (err) {
@@ -530,56 +491,27 @@ export default function ChecklistDashboard() {
     }
   }, [processedInstances])
 
-  const compiledReports = useMemo(() => {
-    if (!adminEmployees.length) return []
-    const todayStr = today()
-    const now = new Date()
-
-    return adminEmployees
-      .filter(emp => emp.role === 'doer') // exclude owner/admins — they don't have tasks
-      .map(emp => {
-      const empInsts = adminInstances.filter(i => i.assigned_to === emp.emp_id)
-
-      const dueInsts = empInsts.filter(i => {
-        if (periodIsPast) return true
-        return i.planned_date <= todayStr
-      })
-      
-      const plan = dueInsts.length
-      const done = dueInsts.filter(i => i.status === 'done').length
-      const onTime = dueInsts.filter(i => isOnTime(i)).length
-
-      // Same rule as the employee dashboard: only days whose 7 PM deadline
-      // has passed are judged. Today is excluded until 7 PM, done or not.
-      const assessable = dueInsts.filter(i => isAssessable(i, now))
-      const onTimeAssessed = assessable.filter(i => isOnTime(i)).length
-
-      // Nothing planned means nothing outstanding — NOT a 100% failure.
-      // Scoring an empty period as -100% put anyone with no tasks in the
-      // period (a new joiner, someone whose tasks are all later in the week,
-      // a week that was closed for a festival) at the bottom of the report
-      // in red. It also disagreed with public_team_summary, which returns 0
-      // for the same case, so the embed and this screen showed different
-      // numbers for one person.
-      const pctWorkNotDone = plan > 0 ? ((done - plan) / plan) * 100 : 0
-      const pctNotOnTime = assessable.length > 0
-        ? ((onTimeAssessed - assessable.length) / assessable.length) * 100
-        : 0
-
-      return {
-        emp_id: emp.emp_id,
-        full_name: emp.full_name,
-        department: emp.department,
-        plan,
-        actual: done,
-        onTime,
-        assessed: assessable.length,   // deadline already passed
-        onTimeAssessed,                // …and finished within it
-        pctWorkNotDone,
-        pctNotOnTime
-      }
-    })
-  }, [adminEmployees, adminInstances, periodIsPast])
+  // The counting now happens in report_summary() (migration 21). All that is
+  // left here is turning counts into the two percentages the table shows.
+  //
+  // Nothing planned means nothing outstanding — NOT a 100% failure. Scoring
+  // an empty period as -100% put anyone with no tasks in it (a new joiner, a
+  // week closed for a festival) at the bottom of the report in red, and
+  // disagreed with public_team_summary, which returns 0 for the same case.
+  const compiledReports = useMemo(() => reportRows.map(r => ({
+    emp_id: r.emp_id,
+    full_name: r.full_name,
+    department: r.department,
+    plan: r.plan,
+    actual: r.actual,
+    onTime: r.on_time,
+    assessed: r.assessed,
+    onTimeAssessed: r.on_time_assessed,
+    pctWorkNotDone: r.plan > 0 ? ((r.actual - r.plan) / r.plan) * 100 : 0,
+    pctNotOnTime: r.assessed > 0
+      ? ((r.on_time_assessed - r.assessed) / r.assessed) * 100
+      : 0,
+  })), [reportRows])
 
   // jsPDF is ~350 KB. Only an admin opening the report ever needs it, so it is
   // loaded on click rather than shipped in the bundle every doer downloads.
@@ -603,18 +535,32 @@ export default function ChecklistDashboard() {
     }
   }
 
-  // Task-by-task export so a disputed number can be checked line by line
-  function downloadEmployeeReport(row) {
+  // Task-by-task export so a disputed number can be checked line by line.
+  //
+  // Fetched on demand for this one employee rather than kept in memory for
+  // everybody: the report itself no longer downloads any instances, and
+  // holding every row for all staff just in case someone clicks Download is
+  // exactly what stopped this screen scaling.
+  async function downloadEmployeeReport(row) {
     const now = new Date()
     const todayStr = today()
-    const detail = adminInstances
-      .filter(i => i.assigned_to === row.emp_id)
-      // Same cut-off the on-screen report uses. Without this the file would
-      // list days that have not happened yet as "0 completed", and the day
-      // rows would not add up to the totals.
-      .filter(i => periodIsPast || i.planned_date <= todayStr)
-      .sort((a, b) =>
-        a.planned_date.localeCompare(b.planned_date) || a.task_code.localeCompare(b.task_code))
+
+    // Same cut-off the on-screen report uses — a finished period counts
+    // every day, the current one only counts up to today. Applied in the
+    // query so the file can never disagree with the totals above it.
+    const lastDay = periodIsPast || reportRange.end <= todayStr
+      ? reportRange.end
+      : todayStr
+
+    const detail = (await fetchAll(
+      () => supabase
+        .from('weekly_dashboard')
+        .select('*', { count: 'exact' })
+        .eq('assigned_to', row.emp_id)
+        .gte('planned_date', reportRange.start)
+        .lte('planned_date', lastDay),
+    )).sort((a, b) =>
+      a.planned_date.localeCompare(b.planned_date) || a.task_code.localeCompare(b.task_code))
 
     const pct = row.assessed > 0
       ? Math.round(((row.assessed - row.onTimeAssessed) / row.assessed) * 100)
@@ -974,15 +920,9 @@ export default function ChecklistDashboard() {
                   {adminDiag.askedFor.startDate === reportRange.start && adminDiag.askedFor.endDate === reportRange.end ? '  ✓ matches' : '  ✗ MISMATCH — stale data on screen'}
                 </span>
               </div>
-              <div>dates actually in it {adminDiag.dateSpan ? `${adminDiag.dateSpan[0]} → ${adminDiag.dateSpan[1]}` : '(none)'}</div>
-              <div>rows ............... received {adminDiag.received} of {adminDiag.serverCount} on server, in {adminDiag.pages} page(s)
-                <span className={adminDiag.received === adminDiag.serverCount ? ' text-emerald-400' : ' text-rose-400 font-bold'}>
-                  {adminDiag.received === adminDiag.serverCount ? '  ✓ complete' : '  ✗ TRUNCATED'}
-                </span>
-              </div>
-              <div>future-dated rows .. {adminDiag.futureRows} (after {today()})
-                <span className="text-slate-400"> · counted in plan? {periodIsPast ? 'YES — periodIsPast=true' : 'no'}</span>
-              </div>
+              <div>counted by ......... report_summary() in the database — no instance rows are downloaded</div>
+              <div>employees returned . {adminDiag.employees} · {adminDiag.totalPlanned} tasks planned across the team</div>
+              <div>period cut-off ..... {periodIsPast ? 'whole period (finished)' : `up to ${today()} (current period)`}</div>
               <div className="mt-2 text-slate-400">
                 per employee (plan/done): {compiledReports.map(r => `${r.full_name.split(/[\s_]/)[0]} ${r.plan}/${r.actual}`).join('  ·  ')}
               </div>

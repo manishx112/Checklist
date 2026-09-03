@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchAll } from '../lib/fetchAll'
 
 // All seven — each employee has their own weekly off (employees.off_day),
 // so Monday is valid for anyone who works Mondays.
@@ -88,22 +89,24 @@ export default function TaskManager() {
     setLoading(true)
     setError(null)
     try {
-      const [{ data: emps, error: empErr }, { data: tks, error: tErr }] = await Promise.all([
-        supabase
-          .from('employees')
-          .select('emp_id, full_name, department, role')
-          .eq('is_active', true)
-          .order('full_name'),
-        supabase
-          .from('tasks')
-          .select('*')
-          .order('assigned_to')
-          .order('task_code'),
+      // Both paginated: 500 staff, or 500 staff × 100 tasks, are well past
+      // the 1000-row response cap, and a truncated list here would look like
+      // tasks had been deleted.
+      const [emps, tks] = await Promise.all([
+        fetchAll(
+          () => supabase
+            .from('employees')
+            .select('emp_id, full_name, department, role', { count: 'exact' })
+            .eq('is_active', true),
+          { orderBy: 'full_name' },
+        ),
+        fetchAll(
+          () => supabase.from('tasks').select('*', { count: 'exact' }),
+          { orderBy: 'task_id' },
+        ),
       ])
-      if (empErr) throw empErr
-      if (tErr) throw tErr
-      setEmployees(emps || [])
-      setTasks(tks || [])
+      setEmployees(emps)
+      setTasks(tks)
     } catch (err) {
       setError(err.message)
     } finally {

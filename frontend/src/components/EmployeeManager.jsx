@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchAll } from '../lib/fetchAll'
 
 // Admin screen for the joiner / leaver cycle.
 //
@@ -61,12 +62,19 @@ export default function EmployeeManager() {
   const fetchEmployees = useCallback(async () => {
     setLoading(true)
     setError(null)
-    const { data, error: err } = await supabase
-      .from('employees')
-      .select('emp_id, emp_code, full_name, department, email, role, off_day, is_active, auth_user_id')
-      .order('emp_code')
-    if (err) setError(err.message)
-    else setEmployees(data || [])
+    try {
+      // 500 staff is half the response cap; a truncated list would look
+      // like people had been deleted.
+      const data = await fetchAll(
+        () => supabase
+          .from('employees')
+          .select('emp_id, emp_code, full_name, department, email, role, off_day, is_active, auth_user_id', { count: 'exact' }),
+        { orderBy: 'emp_code' },
+      )
+      setEmployees(data)
+    } catch (err) {
+      setError(err.message)
+    }
     setLoading(false)
   }, [])
 
