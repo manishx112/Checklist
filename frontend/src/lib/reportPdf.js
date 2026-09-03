@@ -33,6 +33,10 @@ function deviationColor(v) {
 
 const pct = v => `${Number(v).toFixed(2)}%`
 
+// A dash where there is nothing to measure, matching the dashboard. Printing
+// 0.00% for someone who had no tasks would read as a clean sheet.
+const pctOrDash = (v, measurable) => (measurable ? pct(v) : '—')
+
 function niceDate(d) {
   return new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', {
     day: 'numeric', month: 'short', year: 'numeric',
@@ -132,8 +136,8 @@ export function buildReportPdf(rows, meta) {
     r.department || '',
     `${r.actual} / ${r.plan}`,
     String(r.onTime),
-    pct(r.pctWorkNotDone),
-    pct(r.pctNotOnTime),
+    pctOrDash(r.pctWorkNotDone, r.plan > 0),
+    pctOrDash(r.pctNotOnTime, r.assessed > 0),
   ])
 
   autoTable(doc, {
@@ -147,8 +151,8 @@ export function buildReportPdf(rows, meta) {
       '', 'TEAM TOTAL', '',
       `${totals.actual} / ${totals.plan}`,
       String(totals.onTime),
-      pct(totals.pctWorkNotDone),
-      pct(totals.pctNotOnTime),
+      pctOrDash(totals.pctWorkNotDone, totals.plan > 0),
+      pctOrDash(totals.pctNotOnTime, totals.assessed > 0),
     ]],
     theme: 'grid',
     styles: {
@@ -186,6 +190,11 @@ export function buildReportPdf(rows, meta) {
     // Colour the two percentage columns to match the badges on screen
     didParseCell: data => {
       if (data.column.index !== 5 && data.column.index !== 6) return
+      // A dash is not a score — leave it in the default grey
+      if (data.cell.text.join('') === '—') {
+        data.cell.styles.textColor = INK.muted
+        return
+      }
       const src = data.section === 'foot'
         ? (data.column.index === 5 ? totals.pctWorkNotDone : totals.pctNotOnTime)
         : (data.column.index === 5

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import TaskManager from './TaskManager'
 import ChangePassword from './ChangePassword'
@@ -102,6 +102,46 @@ function isOnTime(row) {
 function isAssessable(row, now = new Date()) {
   if (row.status === 'done') return true
   return now > deadlineFor(row)
+}
+
+// Every row of weekly_dashboard in a date range, however many there are.
+//
+// PostgREST caps how many rows one response may carry (Supabase's default is
+// 1000) and silently returns a TRUNCATED set — no error, no warning. The
+// report is a set of counts, so a short read does not look broken, it just
+// quietly reports numbers that are too low.
+//
+// It was also unordered, and without ORDER BY PostgreSQL may return rows in a
+// different physical order each time, so a different slice fell off the end
+// on every load. That is why an employee could vanish from the report and
+// come back after a refresh — the newest employee's rows sit at the end of
+// the table and were the first to be cut.
+//
+// Paging by however many rows actually came back means this is correct
+// whatever the server's cap is set to.
+async function fetchAllInstances(startDate, endDate) {
+  const all = []
+  let total = null
+
+  for (;;) {
+    const { data, error, count } = await supabase
+      .from('weekly_dashboard')
+      .select('*', { count: 'exact' })
+      .gte('planned_date', startDate)
+      .lte('planned_date', endDate)
+      .order('instance_id')                       // stable paging needs a stable order
+      .range(all.length, all.length + 999)
+
+    if (error) throw error
+    if (total === null) total = count ?? 0
+
+    const got = data?.length || 0
+    if (got === 0) break                          // nothing more, or cap is 0
+    all.push(...data)
+    if (all.length >= total) break
+  }
+
+  return all
 }
 
 const FREQ_LABEL = { D: 'Daily', W: 'Weekly', M: 'Monthly' }
@@ -231,6 +271,7 @@ export default function ChecklistDashboard() {
   const [adminEmployees, setAdminEmployees] = useState([])
   const [adminInstances, setAdminInstances] = useState([])
   const [adminLoading, setAdminLoading] = useState(false)
+  const adminFetchRef = useRef(0)   // newest report request wins
 
   // Company Report period — independent of the doer checklist, which is
   // always the current week.
@@ -349,33 +390,34 @@ export default function ChecklistDashboard() {
   const fetchAdminData = useCallback(async () => {
     if (!employee) return
     if (employee.role !== 'admin' && employee.role !== 'viewer') return
-    
+
+    // Only the newest request may write state. Switching Weekly/Monthly or
+    // This/Last quickly fires several; without this the slowest one lands
+    // last and the screen shows the wrong period.
+    const ticket = ++adminFetchRef.current
+
     setAdminLoading(true)
     setError(null)
-    
+
     try {
       const { data: emps, error: empErr } = await supabase
         .from('employees')
         .select('*')
         .eq('is_active', true)
         .order('full_name')
-        
-      if (empErr) throw empErr
-      
-      const { data: insts, error: instErr } = await supabase
-        .from('weekly_dashboard')
-        .select('*')
-        .gte('planned_date', reportRange.start)
-        .lte('planned_date', reportRange.end)
 
-      if (instErr) throw instErr
+      if (empErr) throw empErr
+
+      const insts = await fetchAllInstances(reportRange.start, reportRange.end)
+
+      if (ticket !== adminFetchRef.current) return   // a newer request won
 
       setAdminEmployees(emps || [])
-      setAdminInstances(insts || [])
+      setAdminInstances(insts)
     } catch (err) {
-      setError(err.message)
+      if (ticket === adminFetchRef.current) setError(err.message)
     } finally {
-      setAdminLoading(false)
+      if (ticket === adminFetchRef.current) setAdminLoading(false)
     }
   }, [employee, reportRange])
 
@@ -491,11 +533,18 @@ export default function ChecklistDashboard() {
       const assessable = dueInsts.filter(i => isAssessable(i, now))
       const onTimeAssessed = assessable.filter(i => isOnTime(i)).length
 
-      const pctWorkNotDone = plan > 0 ? ((done - plan) / plan) * 100 : -100.00
+      // Nothing planned means nothing outstanding — NOT a 100% failure.
+      // Scoring an empty period as -100% put anyone with no tasks in the
+      // period (a new joiner, someone whose tasks are all later in the week,
+      // a week that was closed for a festival) at the bottom of the report
+      // in red. It also disagreed with public_team_summary, which returns 0
+      // for the same case, so the embed and this screen showed different
+      // numbers for one person.
+      const pctWorkNotDone = plan > 0 ? ((done - plan) / plan) * 100 : 0
       const pctNotOnTime = assessable.length > 0
         ? ((onTimeAssessed - assessable.length) / assessable.length) * 100
         : 0
-      
+
       return {
         emp_id: emp.emp_id,
         full_name: emp.full_name,
@@ -586,7 +635,11 @@ export default function ChecklistDashboard() {
       ['Deadline already passed', row.assessed],
       ['…of those, done on time', row.onTimeAssessed],
       ['…of those, not on time', row.assessed - row.onTimeAssessed],
-      ['% Not On Time', `${pct}%`, `= ${row.assessed - row.onTimeAssessed} / ${row.assessed}`],
+      ['% Not On Time',
+        row.assessed > 0 ? `${pct}%` : '—',
+        row.assessed > 0
+          ? `= ${row.assessed - row.onTimeAssessed} / ${row.assessed}`
+          : 'no deadline has passed yet in this period'],
       [],
       ['Note', "Tasks whose deadline has not yet passed are excluded from the % — they are not late yet."],
       [],
@@ -945,18 +998,35 @@ export default function ChecklistDashboard() {
                           {row.onTime}
                         </div>
 
-                        {/* % Work Not Done */}
+                        {/* % Work Not Done — a dash, not 0%, when nothing was
+                            planned: a green 0.00% would read as a clean sheet
+                            for someone who simply had no tasks. */}
                         <div className="text-center">
-                          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${getDeviationBadgeClass(row.pctWorkNotDone)}`}>
-                            {row.pctWorkNotDone.toFixed(2)}%
-                          </span>
+                          {row.plan === 0 ? (
+                            <span title="No tasks planned in this period"
+                                  className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200">
+                              —
+                            </span>
+                          ) : (
+                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${getDeviationBadgeClass(row.pctWorkNotDone)}`}>
+                              {row.pctWorkNotDone.toFixed(2)}%
+                            </span>
+                          )}
                         </div>
 
-                        {/* % Not On Time */}
+                        {/* % Not On Time — same rule, but keyed on whether any
+                            deadline has actually passed yet */}
                         <div className="text-center">
-                          <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${getDeviationBadgeClass(row.pctNotOnTime)}`}>
-                            {row.pctNotOnTime.toFixed(2)}%
-                          </span>
+                          {row.assessed === 0 ? (
+                            <span title="No deadline has passed yet in this period"
+                                  className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200">
+                              —
+                            </span>
+                          ) : (
+                            <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold ${getDeviationBadgeClass(row.pctNotOnTime)}`}>
+                              {row.pctNotOnTime.toFixed(2)}%
+                            </span>
+                          )}
                         </div>
 
                         {/* Download */}
