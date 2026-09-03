@@ -3,6 +3,8 @@ import { supabase } from '../lib/supabase'
 import TaskManager from './TaskManager'
 import ChangePassword from './ChangePassword'
 import AdminPasswords from './AdminPasswords'
+import EmployeeManager from './EmployeeManager'
+import HolidayManager from './HolidayManager'
 import './ChecklistDashboard.css'
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -212,6 +214,7 @@ export default function ChecklistDashboard() {
   const [user, setUser] = useState(null)
   const [employee, setEmployee] = useState(null)
   const [instances, setInstances] = useState([])
+  const [holidays, setHolidays] = useState({})   // 'YYYY-MM-DD' -> reason
   const [taskCount, setTaskCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -322,6 +325,26 @@ export default function ChecklistDashboard() {
   }, [employee, weekStart, weekEnd])
 
   useEffect(() => { fetchInstances() }, [fetchInstances])
+
+  // Festival closures for this week. Their instances are already deleted, so
+  // without this a holiday would look like an ordinary day on which the
+  // employee simply did nothing.
+  useEffect(() => {
+    let alive = true
+    supabase
+      .from('working_days')
+      .select('work_date, holiday_reason')
+      .eq('is_holiday', true)
+      .gte('work_date', weekStart)
+      .lte('work_date', weekEnd)
+      .then(({ data }) => {
+        if (!alive) return
+        const map = {}
+        for (const r of data || []) map[r.work_date] = r.holiday_reason || 'Holiday'
+        setHolidays(map)
+      })
+    return () => { alive = false }
+  }, [weekStart, weekEnd])
 
   const fetchAdminData = useCallback(async () => {
     if (!employee) return
@@ -487,6 +510,28 @@ export default function ChecklistDashboard() {
       }
     })
   }, [adminEmployees, adminInstances, periodIsPast])
+
+  // jsPDF is ~350 KB. Only an admin opening the report ever needs it, so it is
+  // loaded on click rather than shipped in the bundle every doer downloads.
+  const [pdfBusy, setPdfBusy] = useState(false)
+
+  async function handleDownloadPdf() {
+    setPdfBusy(true)
+    setError(null)
+    try {
+      const { downloadReportPdf } = await import('../lib/reportPdf')
+      downloadReportPdf(compiledReports, {
+        mode: reportMode,
+        label: reportRange.label,
+        start: reportRange.start,
+        end: reportRange.end,
+      })
+    } catch (err) {
+      setError(`Could not build the PDF: ${err.message}`)
+    } finally {
+      setPdfBusy(false)
+    }
+  }
 
   // Task-by-task export so a disputed number can be checked line by line
   function downloadEmployeeReport(row) {
@@ -711,7 +756,7 @@ export default function ChecklistDashboard() {
       {/* Admins manage tasks and view the company report — but have no personal checklist.
           Viewers (managers) only see the report. Doers only see their own checklist. */}
       {employee?.role === 'admin' && (
-        <div className="flex bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-200 shadow-2xs mb-6 max-w-xs sm:max-w-md">
+        <div className="flex bg-white/80 backdrop-blur-md p-1 rounded-2xl border border-slate-200 shadow-2xs mb-6 gap-1 overflow-x-auto no-scrollbar w-full lg:w-auto lg:inline-flex">
           <button
             onClick={() => setView('report')}
             className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
@@ -733,8 +778,28 @@ export default function ChecklistDashboard() {
             Manage Tasks
           </button>
           <button
-            onClick={() => setView('logins')}
+            onClick={() => setView('employees')}
             className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer ${
+              view === 'employees'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
+            }`}
+          >
+            Employees
+          </button>
+          <button
+            onClick={() => setView('holidays')}
+            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer whitespace-nowrap ${
+              view === 'holidays'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
+            }`}
+          >
+            Holidays
+          </button>
+          <button
+            onClick={() => setView('logins')}
+            className={`flex-1 py-2 px-4 rounded-xl text-xs sm:text-sm font-bold transition-all duration-200 cursor-pointer whitespace-nowrap ${
               view === 'logins'
                 ? 'bg-slate-900 text-white shadow-sm'
                 : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50/50'
@@ -745,7 +810,11 @@ export default function ChecklistDashboard() {
         </div>
       )}
 
-      {view === 'logins' ? (
+      {view === 'holidays' ? (
+        <HolidayManager />
+      ) : view === 'employees' ? (
+        <EmployeeManager />
+      ) : view === 'logins' ? (
         <AdminPasswords />
       ) : view === 'tasks' ? (
         <TaskManager />
@@ -801,6 +870,22 @@ export default function ChecklistDashboard() {
                   </button>
                 ))}
               </div>
+
+              {/* Whole report as a PDF — whichever period is on screen */}
+              <button
+                onClick={handleDownloadPdf}
+                disabled={adminLoading || pdfBusy || compiledReports.length === 0}
+                title={`Download the ${reportMode === 'month' ? 'monthly' : 'weekly'} report as a PDF`}
+                className="relative group overflow-hidden flex items-center justify-center gap-1.5 py-2 px-4 rounded-xl text-xs font-bold text-white bg-slate-900 transition-all duration-300 active:scale-98 cursor-pointer shadow-sm whitespace-nowrap disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed disabled:shadow-none"
+              >
+                <span className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-violet-600 opacity-0 group-hover:opacity-100 group-disabled:opacity-0 transition-opacity duration-500" />
+                <span className="relative z-10 flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  {pdfBusy ? 'Preparing…' : 'Download PDF'}
+                </span>
+              </button>
             </div>
           </div>
 
@@ -1021,6 +1106,21 @@ export default function ChecklistDashboard() {
       {/* Day Chips */}
       <div className="flex md:grid md:grid-cols-7 gap-2.5 mb-6 overflow-x-auto no-scrollbar scroll-smooth snap-x snap-mandatory py-1">
         {week.map(w => {
+          // A festival closure outranks the weekly off: it explains itself
+          const holiday = holidays[w.date]
+          if (holiday) {
+            return (
+              <div
+                key={w.day}
+                title={`${holiday} — plant closed, no tasks`}
+                className="snap-start flex-shrink-0 w-[100px] md:w-auto md:flex-1 p-2.5 rounded-2xl border border-rose-200 text-center bg-rose-50/60 cursor-not-allowed flex flex-col justify-between min-h-[64px]"
+              >
+                <span className="block text-[9px] text-rose-400 font-bold uppercase tracking-wider">{w.day}</span>
+                <small className="block text-[11px] text-rose-700 font-extrabold mt-0.5 truncate px-0.5">{holiday}</small>
+                <div className="w-full bg-rose-200/70 h-1 rounded-full mt-1.5" />
+              </div>
+            )
+          }
           if (w.isOff) {
             return (
               <div key={w.day} className="snap-start flex-shrink-0 w-[100px] md:w-auto md:flex-1 p-2.5 rounded-2xl border border-slate-200 text-center bg-slate-100/50 opacity-50 cursor-not-allowed flex flex-col justify-between min-h-[64px]">

@@ -227,10 +227,20 @@ export default function TaskManager() {
         : err.message)
       return
     }
-    setMessage(form.task_id ? 'Task updated successfully' : 'Task created successfully')
     setShowForm(false)
+
+    // The nightly cron builds instances 60 days ahead. Without this, a task
+    // assigned to a new joiner this morning shows nothing on their checklist
+    // until tomorrow's run.
+    const { data: gen } = await supabase.rpc('admin_generate_instances', { p_days: 60 })
+    const created = gen?.[0]?.success ? gen[0].created : null
+
+    setMessage(
+      (form.task_id ? 'Task updated' : 'Task created') +
+      (created ? ` · ${created} day(s) of tasks generated` : '')
+    )
     await fetchData()
-    setTimeout(() => setMessage(''), 4000)
+    setTimeout(() => setMessage(''), 6000)
   }
 
   async function toggleActive(t) {
